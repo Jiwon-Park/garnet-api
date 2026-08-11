@@ -11,7 +11,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -70,7 +70,7 @@ func main() {
 	app := fiber.New(fiber.Config{
 		AppName:     "garnet-api",
 		Concurrency: cfg.HTTPConcurrency,
-		ErrorHandler: func(c *fiber.Ctx, err error) error {
+		ErrorHandler: func(c fiber.Ctx, err error) error {
 			code := fiber.StatusInternalServerError
 			var fiberErr *fiber.Error
 			if errors.As(err, &fiberErr) {
@@ -100,7 +100,7 @@ func main() {
 	}
 }
 
-func (s *server) get(c *fiber.Ctx) error {
+func (s *server) get(c fiber.Ctx) error {
 	key := c.Params("key")
 	ctx, cancel := context.WithTimeout(context.Background(), s.cfg.RequestTTL)
 	defer cancel()
@@ -123,10 +123,10 @@ func (s *server) get(c *fiber.Ctx) error {
 	return c.JSON(valueResponse{Key: key, Value: value})
 }
 
-func (s *server) set(c *fiber.Ctx) error {
+func (s *server) set(c fiber.Ctx) error {
 	key := c.Params("key")
 	var req setRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "invalid json body")
 	}
 	if req.Value == nil {
@@ -147,7 +147,7 @@ func (s *server) set(c *fiber.Ctx) error {
 	return c.JSON(statusResponse{Key: key, Status: "ok"})
 }
 
-func (s *server) remove(c *fiber.Ctx) error {
+func (s *server) remove(c fiber.Ctx) error {
 	key := c.Params("key")
 	ctx, cancel := context.WithTimeout(context.Background(), s.cfg.RequestTTL)
 	defer cancel()
