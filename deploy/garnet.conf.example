@@ -1,0 +1,10 @@
+{
+  "Port": 6379,
+  "Address": "127.0.0.1",
+  "LogMemorySize": "1g",
+  "IndexMemorySize": "256m",
+  "DisableObjects": true,
+  "DisablePubSub": true,
+  "CompactionFrequencySecs": 60,
+  "CompactionType": "Lookup"
+}

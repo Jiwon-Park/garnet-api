@@ -1,0 +1,92 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  APP_NAME: garnet-api
+
+jobs:
+  verify-build:
+    name: Verify and build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22.x"
+          cache: true
+
+      - name: Check formatting
+        run: test -z "$(gofmt -l .)"
+
+      - name: Test
+        run: go test ./...
+
+      - name: Build linux amd64
+        run: |
+          mkdir -p dist
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o dist/${APP_NAME} .
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.APP_NAME }}-linux-amd64
+          path: dist/${{ env.APP_NAME }}
+
+      - name: Create GitHub release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/${{ env.APP_NAME }}
+
+  deploy:
+    name: Deploy and restart
+    runs-on: ubuntu-latest
+    needs: verify-build
+    environment: production
+    steps:
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ env.APP_NAME }}-linux-amd64
+          path: dist
+
+      - name: Configure SSH
+        env:
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
+
+      - name: Copy binary
+        env:
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ vars.DEPLOY_USER }}
+          DEST: ${{ vars.DEPLOY_PATH }}
+        run: |
+          chmod +x dist/${APP_NAME}
+          ssh -i ~/.ssh/deploy_key "$DEPLOY_USER@$DEPLOY_HOST" "mkdir -p '$DEST'"
+          scp -i ~/.ssh/deploy_key dist/${APP_NAME} "$DEPLOY_USER@$DEPLOY_HOST:$DEST/${APP_NAME}.new"
+          ssh -i ~/.ssh/deploy_key "$DEPLOY_USER@$DEPLOY_HOST" "install -m 0755 '$DEST/${APP_NAME}.new' '$DEST/${APP_NAME}' && rm -f '$DEST/${APP_NAME}.new'"
+
+      - name: Restart service
+        env:
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ vars.DEPLOY_USER }}
+          DEPLOY_SERVICE: ${{ vars.DEPLOY_SERVICE }}
+        run: |
+          ssh -i ~/.ssh/deploy_key "$DEPLOY_USER@$DEPLOY_HOST" "sudo systemctl restart '$DEPLOY_SERVICE'"
+          ssh -i ~/.ssh/deploy_key "$DEPLOY_USER@$DEPLOY_HOST" "sudo systemctl is-active --quiet '$DEPLOY_SERVICE'"
