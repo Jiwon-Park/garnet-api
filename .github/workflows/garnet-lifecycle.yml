@@ -1,0 +1,148 @@
+name: Garnet Lifecycle
+
+on:
+  workflow_dispatch:
+    inputs:
+      command:
+        description: Garnet command to run on the target server
+        required: true
+        default: status
+        type: choice
+        options:
+          - install
+          - start
+          - restart
+          - stop
+          - status
+
+permissions:
+  contents: read
+
+concurrency:
+  group: garnet-lifecycle-${{ vars.DEPLOY_HOST }}
+  cancel-in-progress: false
+
+jobs:
+  garnet:
+    name: Garnet ${{ inputs.command }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      SSH_HOST: ${{ vars.DEPLOY_HOST }}
+      SSH_PORT: ${{ vars.DEPLOY_PORT }}
+      SSH_USER: ${{ vars.DEPLOY_USER }}
+      GARNET_SERVICE_NAME: ${{ vars.GARNET_SERVICE_NAME }}
+      GARNET_VERSION: ${{ vars.GARNET_VERSION }}
+      GARNET_SHA256_X64: ${{ vars.GARNET_SHA256_X64 }}
+      GARNET_SHA256_ARM64: ${{ vars.GARNET_SHA256_ARM64 }}
+      GARNET_PORT: ${{ vars.GARNET_PORT }}
+      GARNET_BIND_ADDRESS: ${{ vars.GARNET_BIND_ADDRESS }}
+      GARNET_LOG_MEMORY_SIZE: ${{ vars.GARNET_LOG_MEMORY_SIZE }}
+      GARNET_INDEX_MEMORY_SIZE: ${{ vars.GARNET_INDEX_MEMORY_SIZE }}
+      GARNET_COMPACTION_FREQUENCY_SECS: ${{ vars.GARNET_COMPACTION_FREQUENCY_SECS }}
+      GARNET_COMPACTION_TYPE: ${{ vars.GARNET_COMPACTION_TYPE }}
+      GARNET_DISABLE_OBJECTS: ${{ vars.GARNET_DISABLE_OBJECTS }}
+      GARNET_DISABLE_PUBSUB: ${{ vars.GARNET_DISABLE_PUBSUB }}
+      GARNET_AUTH_ENABLED: ${{ vars.GARNET_AUTH_ENABLED }}
+      GARNET_EXTRA_ARGS: ${{ vars.GARNET_EXTRA_ARGS }}
+      GARNET_PASSWORD: ${{ secrets.GARNET_PASSWORD }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate GitHub config
+        shell: bash
+        run: |
+          required_vars=(
+            SSH_HOST
+            SSH_PORT
+            SSH_USER
+            GARNET_SERVICE_NAME
+            GARNET_VERSION
+            GARNET_SHA256_X64
+            GARNET_SHA256_ARM64
+            GARNET_PORT
+            GARNET_BIND_ADDRESS
+            GARNET_LOG_MEMORY_SIZE
+            GARNET_INDEX_MEMORY_SIZE
+            GARNET_COMPACTION_FREQUENCY_SECS
+            GARNET_COMPACTION_TYPE
+            GARNET_DISABLE_OBJECTS
+            GARNET_DISABLE_PUBSUB
+            GARNET_AUTH_ENABLED
+          )
+          for name in "${required_vars[@]}"; do
+            if [[ -z "${!name}" ]]; then
+              echo "Missing GitHub variable: $name" >&2
+              exit 1
+            fi
+          done
+          if [[ "$GARNET_AUTH_ENABLED" == "true" && -z "$GARNET_PASSWORD" ]]; then
+            echo "Missing GitHub secret: GARNET_PASSWORD" >&2
+            exit 1
+          fi
+
+      - name: Configure SSH
+        env:
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.DEPLOY_SSH_KNOWN_HOSTS }}
+        shell: bash
+        run: |
+          if [[ -z "$SSH_KEY" ]]; then
+            echo "Missing GitHub secret: DEPLOY_SSH_KEY" >&2
+            exit 1
+          fi
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          if [[ -n "$SSH_KNOWN_HOSTS" ]]; then
+            printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          else
+            ssh-keyscan -p "$SSH_PORT" -H "$SSH_HOST" >> ~/.ssh/known_hosts
+          fi
+
+      - name: Render Garnet config
+        shell: bash
+        run: |
+          render_env() {
+            local name="$1"
+            local value="${!name}"
+            value="${value//$'\r'/}"
+            value="${value//$'\n'/}"
+            value="${value//\\/\\\\}"
+            value="${value//\"/\\\"}"
+            printf '%s="%s"\n' "$name" "$value"
+          }
+          config_file="$RUNNER_TEMP/garnet.env"
+          umask 077
+          {
+            render_env GARNET_SERVICE_NAME
+            render_env GARNET_VERSION
+            render_env GARNET_SHA256_X64
+            render_env GARNET_SHA256_ARM64
+            render_env GARNET_PORT
+            render_env GARNET_BIND_ADDRESS
+            render_env GARNET_LOG_MEMORY_SIZE
+            render_env GARNET_INDEX_MEMORY_SIZE
+            render_env GARNET_COMPACTION_FREQUENCY_SECS
+            render_env GARNET_COMPACTION_TYPE
+            render_env GARNET_DISABLE_OBJECTS
+            render_env GARNET_DISABLE_PUBSUB
+            render_env GARNET_AUTH_ENABLED
+            render_env GARNET_EXTRA_ARGS
+            render_env GARNET_PASSWORD
+          } > "$config_file"
+
+      - name: Copy lifecycle files
+        shell: bash
+        run: |
+          ssh_target="$SSH_USER@$SSH_HOST"
+          scp -P "$SSH_PORT" -i ~/.ssh/deploy_key deploy/garnet-lifecycle-remote.sh "$ssh_target:/tmp/garnet-lifecycle-remote.sh"
+          scp -P "$SSH_PORT" -i ~/.ssh/deploy_key "$RUNNER_TEMP/garnet.env" "$ssh_target:/tmp/garnet.env"
+
+      - name: Run Garnet command
+        shell: bash
+        run: |
+          ssh_target="$SSH_USER@$SSH_HOST"
+          ssh -p "$SSH_PORT" -i ~/.ssh/deploy_key "$ssh_target" \
+            "sudo -n install -m 0755 /tmp/garnet-lifecycle-remote.sh /usr/local/sbin/garnet-lifecycle && sudo -n install -D -m 0600 /tmp/garnet.env /etc/garnet/garnet.env && sudo -n /usr/local/sbin/garnet-lifecycle '${{ inputs.command }}'"
