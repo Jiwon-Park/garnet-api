@@ -112,61 +112,9 @@ jobs:
         run: |
           test -f "$TARGET_BINARY"
           chmod +x "$TARGET_BINARY"
-          ssh -i ~/.ssh/deploy_key "$DEPLOY_USER@$DEPLOY_HOST" "mkdir -p '$DEST'"
+          ssh -i ~/.ssh/deploy_key "$DEPLOY_USER@$DEPLOY_HOST" "sudo mkdir -p '$DEST'"
           scp -i ~/.ssh/deploy_key "$TARGET_BINARY" "$DEPLOY_USER@$DEPLOY_HOST:$DEST/${APP_NAME}.new"
-          ssh -i ~/.ssh/deploy_key "$DEPLOY_USER@$DEPLOY_HOST" "install -m 0755 '$DEST/${APP_NAME}.new' '$DEST/${APP_NAME}' && rm -f '$DEST/${APP_NAME}.new'"
-
-      - name: Install systemd unit
-        env:
-          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
-          DEPLOY_USER: ${{ vars.DEPLOY_USER }}
-          DEPLOY_SERVICE: ${{ vars.DEPLOY_SERVICE }}
-          DEPLOY_PATH: ${{ vars.DEPLOY_PATH }}
-        run: |
-          # Render the unit on the runner, scp to the target, install to /etc/systemd/system,
-          # daemon-reload, and enable. The unit is generated from $DEPLOY_SERVICE (unit name)
-          # and $DEPLOY_PATH (binary install directory) so the deploy config fully drives the
-          # service definition; no static template is required in the repo.
-          # Note: the deploy path must be readable by the service user. If DEPLOY_PATH is a
-          # directory owned by a different user (e.g. /home/opc/project), grant the service
-          # user read+execute access (chmod a+rx, or set ACLs) before the first restart.
-          unit_path="/tmp/${DEPLOY_SERVICE}.service"
-          cat > "$unit_path" <<EOF
-          [Unit]
-          Description=Garnet API Server
-          After=network-online.target
-          Wants=network-online.target
-
-          [Service]
-          Type=simple
-          User=garnet-api
-          Group=garnet-api
-          WorkingDirectory=${DEPLOY_PATH}
-          EnvironmentFile=-/etc/garnet-api/garnet-api.env
-          ExecStart=${DEPLOY_PATH}/${APP_NAME}
-          Restart=always
-          RestartSec=3
-          KillSignal=SIGTERM
-          TimeoutStopSec=10
-          NoNewPrivileges=true
-          PrivateTmp=true
-          ProtectSystem=strict
-          ProtectHome=true
-          ReadWritePaths=${DEPLOY_PATH}
-          LimitNOFILE=1048576
-
-          [Install]
-          WantedBy=multi-user.target
-          EOF
-
-          scp -i ~/.ssh/deploy_key "$unit_path" "$DEPLOY_USER@$DEPLOY_HOST:$unit_path"
-          ssh -i ~/.ssh/deploy_key "$DEPLOY_USER@$DEPLOY_HOST" \
-            "sudo -n bash -c '
-              id -u garnet-api >/dev/null 2>&1 || useradd --system --no-create-home --shell /usr/sbin/nologin garnet-api
-              install -m 0644 $unit_path /etc/systemd/system/${DEPLOY_SERVICE}.service
-              systemctl daemon-reload
-              systemctl enable ${DEPLOY_SERVICE}
-            '"
+          ssh -i ~/.ssh/deploy_key "$DEPLOY_USER@$DEPLOY_HOST" "sudo install -m 0755 '$DEST/${APP_NAME}.new' '$DEST/${APP_NAME}' && sudo rm -f '$DEST/${APP_NAME}.new'"
 
       - name: Restart service
         env:
