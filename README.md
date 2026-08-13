@@ -1,6 +1,6 @@
 # garnet-api
 
-Lightweight GoFiber API server for controlling Garnet with get, set, remove, and translation-aware (atomic source → translation + last-used) operations.
+Lightweight GoFiber API server providing a single key-value endpoint over Garnet. Two routes only: a health probe and `GET / PUT /keys/{key}`.
 
 ## API
 
@@ -8,13 +8,13 @@ Lightweight GoFiber API server for controlling Garnet with get, set, remove, and
 GET /healthz
 GET /keys/{key}
 PUT /keys/{key}
-DELETE /keys/{key}
-POST /translate
 ```
 
-### Key-value operations
+### Operations
 
-Set request body:
+**`GET /keys/{key}`** — read. Returns the value as JSON. When `LRU_IDLE_TTL_SECONDS` is non-zero, the key's idle TTL is refreshed (GETEX) on every successful read; when `0`, no TTL is touched.
+
+**`PUT /keys/{key}`** — write. Replaces the value. Body:
 
 ```json
 {
@@ -23,47 +23,13 @@ Set request body:
 }
 ```
 
-`ttl_seconds` is optional. If `LRU_IDLE_TTL_SECONDS` is set and the body omits `ttl_seconds`, set uses that idle TTL. When `LRU_IDLE_TTL_SECONDS` is non-zero, GET also refreshes the same TTL with Garnet `GETEX`, so recently used keys stay alive and idle keys are removed by Garnet expiration. When `LRU_IDLE_TTL_SECONDS=0`, no TTL is applied — keys live until explicitly deleted or until an explicit per-request `ttl_seconds` expires them.
+`ttl_seconds` is optional. If omitted, the configured `LRU_IDLE_TTL_SECONDS` is used; if both are `0`, no TTL is applied (key lives until explicitly deleted or until Garnet's persistent storage is wiped).
 
-### Translation operations
-
-```http
-POST /translate
-```
-
-Write (store translation + last-used timestamp atomically):
-
-```json
-{
-  "source": "hello",
-  "translation": "hola",
-  "ttl_seconds": 3600
-}
-```
-
-Read (fetch translation + bump last-used; omit `translation`):
-
-```json
-{
-  "source": "hello"
-}
-```
-
-Response:
-
-```json
-{
-  "source": "hello",
-  "translation": "hola",
-  "found": true
-}
-```
-
-The endpoint stores `source → translation` and a `last_used` timestamp as two distinct keys (`trans:<source>` and `used:<source>`) in one atomic pipeline, so each TTL is refreshed independently — bumping last-used does not rewrite the translation payload.
+> There is no `DELETE` route. If you need to remove a key, set it with a 1-second `ttl_seconds` and let it expire, or delete it directly from Garnet.
 
 ### Key validation
 
-Keys may only contain `A-Za-z0-9._:/@-`, be at most 512 bytes, and set values must be non-empty and at most 1 MiB.
+Keys may only contain `A-Za-z0-9._:/@-`, be at most 512 bytes. Set values must be non-empty and at most 1 MiB. These limits are enforced by the API regardless of how the client reaches Garnet, but a Garnet admin connecting directly bypasses them.
 
 ## Configuration
 

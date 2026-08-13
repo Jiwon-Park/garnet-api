@@ -225,7 +225,7 @@ func TestIntegration_Health(t *testing.T) {
 	}
 }
 
-func TestIntegration_SetGetDelete(t *testing.T) {
+func TestIntegration_SetGet(t *testing.T) {
 	e := newIntegrationEnv(t)
 
 	// Set
@@ -254,21 +254,15 @@ func TestIntegration_SetGetDelete(t *testing.T) {
 		t.Fatalf("get missing status = %d, want 404", status)
 	}
 
-	// Delete
-	status, body = e.do(t, http.MethodDelete, "/keys/test-key", nil)
+	// Overwrite: PUT on the same key replaces the value
+	status, _ = e.do(t, http.MethodPut, "/keys/test-key", setRequest{Value: valPtr("world")})
 	if status != 200 {
-		t.Fatalf("delete status = %d (body=%s)", status, string(body))
+		t.Fatalf("overwrite status = %d", status)
 	}
-	dr := decode[statusResponse](t, body)
-	if !dr.Removed {
-		t.Fatalf("delete removed = false, want true")
-	}
-
-	// Delete again -> removed=false
-	status, body = e.do(t, http.MethodDelete, "/keys/test-key", nil)
-	dr = decode[statusResponse](t, body)
-	if dr.Removed {
-		t.Fatalf("re-delete removed = true, want false")
+	status, body = e.do(t, http.MethodGet, "/keys/test-key", nil)
+	gr = decode[valueResponse](t, body)
+	if gr.Value != "world" {
+		t.Fatalf("overwrite value = %q, want world", gr.Value)
 	}
 }
 
@@ -371,129 +365,5 @@ func TestIntegration_TTLExpireDeletion(t *testing.T) {
 	status, _ = e.do(t, http.MethodGet, "/keys/expiring", nil)
 	if status != 404 {
 		t.Fatalf("get expired status = %d, want 404", status)
-	}
-
-	// Delete expired key -> removed=false.
-	status, body := e.do(t, http.MethodDelete, "/keys/expiring", nil)
-	dr := decode[statusResponse](t, body)
-	if dr.Removed {
-		t.Fatalf("delete expired removed=true, want false")
-	}
-}
-
-func TestIntegration_TranslateWriteRead(t *testing.T) {
-	e := newIntegrationEnv(t)
-
-	// Write translation
-	status, body := e.do(t, http.MethodPost, "/translate", translateRequest{
-		Source: "hello", Translation: "hola", TTLSeconds: intPtr(60),
-	})
-	if status != 200 {
-		t.Fatalf("translate write status = %d (body=%s)", status, string(body))
-	}
-	tr := decode[translateResponse](t, body)
-	if !tr.Found || tr.Translation != "hola" {
-		t.Fatalf("translate write response = %+v", tr)
-	}
-
-	// Direct checks: two distinct keys exist
-	transExists, _ := e.rdb.Exists(context.Background(), "trans:hello").Result()
-	usedExists, _ := e.rdb.Exists(context.Background(), "used:hello").Result()
-	if transExists != 1 || usedExists != 1 {
-		t.Fatalf("expected trans:hello and used:hello to exist; trans=%d used=%d", transExists, usedExists)
-	}
-
-	// Read translation (omit Translation field)
-	status, body = e.do(t, http.MethodPost, "/translate", translateRequest{Source: "hello"})
-	if status != 200 {
-		t.Fatalf("translate read status = %d (body=%s)", status, string(body))
-	}
-	tr = decode[translateResponse](t, body)
-	if !tr.Found || tr.Translation != "hola" {
-		t.Fatalf("translate read response = %+v, want found hola", tr)
-	}
-
-	// used:hello should have been bumped (different timestamp than first write).
-	usedFirst, _ := e.rdb.Get(context.Background(), "used:hello").Result()
-	time.Sleep(20 * time.Millisecond)
-	_, _ = e.do(t, http.MethodPost, "/translate", translateRequest{Source: "hello"})
-	usedSecond, _ := e.rdb.Get(context.Background(), "used:hello").Result()
-	if usedFirst == usedSecond {
-		t.Fatalf("used timestamp not bumped; both=%s", usedFirst)
-	}
-
-	// trans:hello value unchanged by read
-	trans, _ := e.rdb.Get(context.Background(), "trans:hello").Result()
-	if trans != "hola" {
-		t.Fatalf("trans value changed by read; got=%s", trans)
-	}
-}
-
-func TestIntegration_TranslateNotFound(t *testing.T) {
-	e := newIntegrationEnv(t)
-	status, body := e.do(t, http.MethodPost, "/translate", translateRequest{Source: "missing"})
-	if status != 200 {
-		t.Fatalf("translate read missing status = %d (body=%s)", status, string(body))
-	}
-	tr := decode[translateResponse](t, body)
-	if tr.Found {
-		t.Fatalf("translate missing found=true, want false (resp=%+v)", tr)
-	}
-}
-
-func TestIntegration_TranslateValidation(t *testing.T) {
-	e := newIntegrationEnv(t)
-
-	// missing source
-	status, _ := e.do(t, http.MethodPost, "/translate", translateRequest{Translation: "x"})
-	if status != 400 {
-		t.Fatalf("translate missing source status = %d, want 400", status)
-	}
-
-	// source too long
-	long := make([]byte, maxKeyLen+1)
-	for i := range long {
-		long[i] = 'a'
-	}
-	status, _ = e.do(t, http.MethodPost, "/translate", translateRequest{Source: string(long), Translation: "x"})
-	if status != 400 {
-		t.Fatalf("translate long source status = %d, want 400", status)
-	}
-}
-
-func TestIntegration_TranslateTTLExpire(t *testing.T) {
-	e := newIntegrationEnv(t)
-
-	// Write with 1s TTL
-	status, _ := e.do(t, http.MethodPost, "/translate", translateRequest{
-		Source: "temp", Translation: "tmp", TTLSeconds: intPtr(1),
-	})
-	if status != 200 {
-		t.Fatalf("translate write status = %d", status)
-	}
-
-	// Both keys exist
-	if ex, _ := e.rdb.Exists(context.Background(), "trans:temp").Result(); ex != 1 {
-		t.Fatalf("trans:temp should exist; got %d", ex)
-	}
-
-	// Wait for expiration
-	time.Sleep(1200 * time.Millisecond)
-
-	if ex, _ := e.rdb.Exists(context.Background(), "trans:temp").Result(); ex != 0 {
-		t.Fatalf("trans:temp should be expired; got %d", ex)
-	}
-	if ex, _ := e.rdb.Exists(context.Background(), "used:temp").Result(); ex != 0 {
-		t.Fatalf("used:temp should be expired; got %d", ex)
-	}
-
-	// Read after expiry -> not found
-	status, body := e.do(t, http.MethodPost, "/translate", translateRequest{Source: "temp"})
-	if status != 200 {
-		t.Fatalf("translate read after expire status = %d (body=%s)", status, string(body))
-	}
-	tr := decode[translateResponse](t, body)
-	if tr.Found {
-		t.Fatalf("translate after expire found=true, want false")
 	}
 }

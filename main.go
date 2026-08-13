@@ -18,11 +18,8 @@ import (
 )
 
 const (
-	maxKeyLen          = 512
-	maxValueLen        = 1 << 20 // 1 MiB
-	translationPrefix  = "trans:"
-	lastUsedPrefix     = "used:"
-	lastUsedTimeFormat = time.RFC3339Nano
+	maxKeyLen   = 512
+	maxValueLen = 1 << 20 // 1 MiB
 )
 
 var keyPattern = regexp.MustCompile(`^[A-Za-z0-9._:/@\-]+$`)
@@ -49,27 +46,15 @@ type setRequest struct {
 	TTLSeconds *int64  `json:"ttl_seconds,omitempty"`
 }
 
-type translateRequest struct {
-	Source      string `json:"source"`
-	Translation string `json:"translation"`
-	TTLSeconds  *int64 `json:"ttl_seconds,omitempty"`
-}
-
 type valueResponse struct {
 	Key   string `json:"key"`
 	Value string `json:"value"`
 }
 
 type statusResponse struct {
-	Key     string `json:"key"`
-	Status  string `json:"status,omitempty"`
+	Key    string `json:"key"`
+	Status string `json:"status,omitempty"`
 	Removed bool   `json:"removed,omitempty"`
-}
-
-type translateResponse struct {
-	Source      string `json:"source"`
-	Translation string `json:"translation,omitempty"`
-	Found       bool   `json:"found"`
 }
 
 type healthResponse struct {
@@ -149,7 +134,6 @@ func newApp(srv *server) *fiber.App {
 	app.Get("/keys/:key", srv.get)
 	app.Put("/keys/:key", srv.set)
 	app.Delete("/keys/:key", srv.remove)
-	app.Post("/translate", srv.translate)
 	return app
 }
 
@@ -242,69 +226,6 @@ func (s *server) remove(c fiber.Ctx) error {
 	}
 
 	return c.JSON(statusResponse{Key: key, Removed: count > 0})
-}
-
-// translate stores source -> translation plus a last-used timestamp using a single
-// atomic pipeline. The translation value and the last-used timestamp are written as
-// distinct keys (prefixed `trans:` and `used:`) so each can be refreshed independently:
-// reading a translation refreshes only its own idle TTL via GETEX, and bumping
-// last-used does not rewrite the translation payload. Both keys share the same TTL.
-func (s *server) translate(c fiber.Ctx) error {
-	var req translateRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "invalid json body")
-	}
-	if req.Source == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "source is required")
-	}
-	if len(req.Source) > maxKeyLen {
-		return fiber.NewError(fiber.StatusBadRequest, fmt.Sprintf("source exceeds %d bytes", maxKeyLen))
-	}
-
-	ttl, err := s.ttlForSet(req.TTLSeconds)
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, err.Error())
-	}
-
-	transKey := translationPrefix + req.Source
-	usedKey := lastUsedPrefix + req.Source
-	now := time.Now().UTC().Format(lastUsedTimeFormat)
-
-	ctx, cancel := context.WithTimeout(context.Background(), s.cfg.RequestTTL)
-	defer cancel()
-
-	if req.Translation == "" {
-		// Read: fetch translation (refreshing its idle TTL via GETEX) and bump last-used
-		// atomically in one pipeline. GETEX returns redis.Nil when the key is absent;
-		// the used-key is still set so subsequent reads record the attempt.
-		pipe := s.db.TxPipeline()
-		get := pipe.GetEx(ctx, transKey, ttl)
-		pipe.Set(ctx, usedKey, now, ttl)
-		if _, err := pipe.Exec(ctx); err != nil && !errors.Is(err, redis.Nil) {
-			return fiber.NewError(fiber.StatusBadGateway, err.Error())
-		}
-		value, getErr := get.Result()
-		if errors.Is(getErr, redis.Nil) {
-			return c.JSON(translateResponse{Source: req.Source, Found: false})
-		}
-		if getErr != nil {
-			return fiber.NewError(fiber.StatusBadGateway, getErr.Error())
-		}
-		return c.JSON(translateResponse{Source: req.Source, Translation: value, Found: true})
-	}
-
-	// Write: store translation and last-used in one pipeline.
-	if len(req.Translation) > maxValueLen {
-		return fiber.NewError(fiber.StatusBadRequest, fmt.Sprintf("translation exceeds %d bytes", maxValueLen))
-	}
-	pipe := s.db.TxPipeline()
-	pipe.Set(ctx, transKey, req.Translation, ttl)
-	pipe.Set(ctx, usedKey, now, ttl)
-	if _, err := pipe.Exec(ctx); err != nil {
-		return fiber.NewError(fiber.StatusBadGateway, err.Error())
-	}
-
-	return c.JSON(translateResponse{Source: req.Source, Translation: req.Translation, Found: true})
 }
 
 func (s *server) ttlForSet(ttlSeconds *int64) (time.Duration, error) {

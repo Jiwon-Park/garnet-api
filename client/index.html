@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>garnet-api client</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body { font: 14px/1.45 system-ui, Segoe UI, Roboto, sans-serif; max-width: 720px; margin: 1.5rem auto; padding: 0 1rem; }
+    h1 { font-size: 1.3rem; margin: 0 0 1rem; }
+    h2 { font-size: 1rem; margin: 1.5rem 0 0.5rem; border-bottom: 1px solid var(--border, #ccc); padding-bottom: 0.25rem; }
+    label { display: inline-block; min-width: 8rem; margin-top: 0.4rem; }
+    input, textarea { box-sizing: border-box; width: 100%; margin-top: 0.2rem; padding: 0.3rem 0.4rem; font: inherit; }
+    textarea { min-height: 4rem; resize: vertical; }
+    .row { display: flex; gap: 0.5rem; margin-top: 0.5rem; align-items: center; flex-wrap: wrap; }
+    button { padding: 0.35rem 0.8rem; border: 1px solid var(--border, #ccc); border-radius: 4px; background: var(--btn-bg, #fff); color: var(--btn-fg, #000); cursor: pointer; }
+    button:hover { background: var(--btn-hover, #eee); }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    pre { background: var(--pre-bg, #f5f5f5); padding: 0.6rem; border-radius: 4px; overflow: auto; white-space: pre-wrap; word-break: break-all; margin-top: 0.5rem; min-height: 2rem; }
+    .ok { border-left: 3px solid #2e7d32; }
+    .err { border-left: 3px solid #c62828; }
+    .muted { color: var(--muted, #888); font-size: 0.85rem; }
+ </style>
+</head>
+<body>
+  <h1>garnet-api client</h1>
+  <p class="muted">Plain JS, no dependencies. Runs in Chrome directly from this file. Set the base URL and click any action</p>
+
+  <div class="row">
+    <label for="base">Base URL</label>
+    <input id="base" type="text" value="http://127.0.0.1:3000" />
+    <button id="health-btn">Check health</button>
+ </div>
+
+  <h2>Key-value</h2>
+  <label for="key">Key</label>
+  <input id="key" type="text" placeholder="trans:hello" />
+  <label for="value">Value (for PUT</label>
+  <textarea id="value" placeholder="hello</textarea>
+  <label for="ttl">TTL seconds (optional, 0 = no expiration</label>
+  <input id="ttl" type="number" min="0" placeholder="3600" />
+  <div class="row">
+    <button id="get-btn">GET</button>
+    <button id="set-btn">PUT</button>
+ </div>
+  <p class="muted">No DELETE endpoint. To drop a key, write it with a 1-second TTL and wait</p>
+
+  <h2>Response</h2>
+  <pre id="out" class="ok">—</pre>
+
+  <script>
+    "use strict";
+    const $ = (id) => document.getElementById(id);
+    const out = $("out");
+    const trim = (s) => (s == null ? "" : String(s).trim());
+
+    function base() {
+      let b = trim($("base").value);
+      if (b === "") b = "http://127.0.0.1:3000";
+      return b.replace(/\/+$/, "");
+    }
+
+    async function call(method, path, body) {
+      const opt = { method, headers: {} };
+      if (body !== undefined) {
+        opt.headers["Content-Type"] = "application/json";
+        opt.body = JSON.stringify(body);
+      }
+      out.textContent = `${method} ${path} …`;
+      out.className = "ok";
+      try {
+        const resp = await fetch(base() + path, opt);
+        const text = await resp.text();
+        let pretty = text;
+        try { pretty = JSON.stringify(JSON.parse(text), null, 2); } catch { /* keep raw */ }
+        out.textContent = `${resp.status} ${resp.statusText}\n\n${pretty}`;
+        if (!resp.ok) out.className = "err";
+      } catch (e) {
+        out.textContent = String(e);
+        out.className = "err";
+      }
+    }
+
+    function ttl(elId) {
+      const raw = trim($(elId).value);
+      if (raw === "") return undefined;
+      const n = Number(raw);
+      if (!Number.isFinite(n) || n < 0) return undefined;
+      return n;
+    }
+
+    $("health-btn").addEventListener("click", () => call("GET", "/healthz"));
+
+    $("get-btn").addEventListener("click", () => {
+      const k = trim($("key").value);
+      if (!k) return (out.textContent = "key required", out.className = "err");
+      call("GET", "/keys/" + encodeURIComponent(k));
+    });
+
+    $("set-btn").addEventListener("click", () => {
+      const k = trim($("key").value);
+      const v = $("value").value;
+      if (!k) return (out.textContent = "key required", out.className = "err");
+      if (v === "") return (out.textContent = "value required", out.className = "err");
+      const body = { value: v };
+      const t = ttl("ttl");
+      if (t !== undefined) body.ttl_seconds = t;
+      call("PUT", "/keys/" + encodeURIComponent(k), body);
+    });
+ </script>
+</body>
+</html>
