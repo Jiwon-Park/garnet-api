@@ -113,8 +113,8 @@ jobs:
           test -f "$TARGET_BINARY"
           chmod +x "$TARGET_BINARY"
           ssh -i ~/.ssh/deploy_key "$DEPLOY_USER@$DEPLOY_HOST" "sudo mkdir -p '$DEST'"
-          scp -i ~/.ssh/deploy_key "$TARGET_BINARY" "$DEPLOY_USER@$DEPLOY_HOST:$DEST/${APP_NAME}.new"
-          ssh -i ~/.ssh/deploy_key "$DEPLOY_USER@$DEPLOY_HOST" "sudo install -m 0755 '$DEST/${APP_NAME}.new' '$DEST/${APP_NAME}' && sudo rm -f '$DEST/${APP_NAME}.new'"
+          scp -i ~/.ssh/deploy_key "$TARGET_BINARY" "$DEPLOY_USER@$DEPLOY_HOST:~/${APP_NAME}.new"
+          ssh -i ~/.ssh/deploy_key "$DEPLOY_USER@$DEPLOY_HOST" "sudo install -m 0755 '~/${APP_NAME}.new' '$DEST/${APP_NAME}' && sudo rm -f '~/${APP_NAME}.new'"
 
       - name: Restart service
         env:
