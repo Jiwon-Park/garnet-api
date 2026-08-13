@@ -139,6 +139,8 @@ jobs:
 
           [Service]
           Type=simple
+          User=${DEPLOY_USER}
+          Group=${DEPLOY_USER}
           WorkingDirectory=${DEPLOY_PATH}
           EnvironmentFile=-/etc/garnet-api/garnet-api.env
           ExecStart=${DEPLOY_PATH}/${APP_NAME}
