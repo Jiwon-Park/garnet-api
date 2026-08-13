@@ -53,4 +53,4 @@ The target server must have:
 - `curl`, `tar`, `xz`, and `sha256sum` available
 - systemd
 
-The workflow installs Garnet as a systemd service running the native `garnet-server` binary at `/opt/garnet/garnet-server`.
+The workflow installs Garnet as a systemd service running the native `GarnetServer` binary at `/opt/garnet/GarnetServer`.

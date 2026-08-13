@@ -3,7 +3,7 @@ set -euo pipefail
 
 CONFIG_FILE="/etc/garnet/garnet.env"
 INSTALL_DIR="/opt/garnet"
-BINARY="garnet-server"
+BINARY="GarnetServer"
 RUNNER_FILE="/usr/local/bin/garnet-server-run"
 SERVICE_FILE=""
 
@@ -196,11 +196,11 @@ install_garnet() {
   echo "Checksum OK ($actual_sha)"
 
   tar -xJf "$tmpdir/$asset" -C "$tmpdir"
-  # The tarball extracts to a directory containing the garnet-server executable.
+  # The tarball extracts to a directory containing the GarnetServer executable.
   local bin
   bin="$(find "$tmpdir" -type f -name "$BINARY" -path '*linux*based*' | head -n1)"
   if [[ -z "$bin" ]]; then
-    # Fallback: any executable named garnet-server.
+    # Fallback: any executable named GarnetServer.
     bin="$(find "$tmpdir" -type f -name "$BINARY" | head -n1)"
   fi
   if [[ -z "$bin" ]]; then
