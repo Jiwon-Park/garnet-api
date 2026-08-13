@@ -23,9 +23,7 @@ Set request body:
 }
 ```
 
-`ttl_seconds` is optional. If `LRU_IDLE_TTL_SECONDS` is set and the body omits `ttl_seconds`, set uses that idle TTL. Get also refreshes the same TTL with Garnet `GETEX`, so recently used keys stay alive and idle keys are removed by Garnet expiration.
-
-TTL refresh on read is on by default: even when `LRU_IDLE_TTL_SECONDS=0`, `GET` refreshes the key's TTL using a default idle TTL (1 hour). Set `LRU_IDLE_TTL_SECONDS` to a non-zero value to override.
+`ttl_seconds` is optional. If `LRU_IDLE_TTL_SECONDS` is set and the body omits `ttl_seconds`, set uses that idle TTL. When `LRU_IDLE_TTL_SECONDS` is non-zero, GET also refreshes the same TTL with Garnet `GETEX`, so recently used keys stay alive and idle keys are removed by Garnet expiration. When `LRU_IDLE_TTL_SECONDS=0`, no TTL is applied — keys live until explicitly deleted or until an explicit per-request `ttl_seconds` expires them.
 
 ### Translation operations
 
@@ -76,7 +74,7 @@ Keys may only contain `A-Za-z0-9._:/@-`, be at most 512 bytes, and set values mu
 | `GARNET_PASSWORD` | empty | Garnet password |
 | `GARNET_DB` | `0` | Garnet database index |
 | `REQUEST_TIMEOUT_MS` | `500` | Per-request Garnet timeout |
-| `LRU_IDLE_TTL_SECONDS` | `0` | Access-refreshed idle TTL. `0` uses a 1h default; TTL refresh on read is always on |
+| `LRU_IDLE_TTL_SECONDS` | `0` | Access-refreshed idle TTL. `0` means no TTL — keys live until explicitly deleted |
 | `REDIS_POOL_SIZE` | `GOMAXPROCS * 32` | Garnet connection pool size |
 | `HTTP_CONCURRENCY` | `262144` | Fiber concurrent connection limit |
 

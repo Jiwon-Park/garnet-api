@@ -40,15 +40,15 @@ func TestTTLForSetRejectsNegativeTTL(t *testing.T) {
 	}
 }
 
-func TestTTLForSetFallsBackToDefaultWhenLRUIdleTTLZero(t *testing.T) {
+func TestTTLForSetReturnsZeroWhenLRUIdleTTLZero(t *testing.T) {
 	s := server{cfg: config{LRUIdleTTL: 0}}
 
 	ttl, err := s.ttlForSet(nil)
 	if err != nil {
 		t.Fatalf("ttlForSet returned error: %v", err)
 	}
-	if ttl != defaultLRUIdleTTL {
-		t.Fatalf("ttl = %s, want %s (default)", ttl, defaultLRUIdleTTL)
+	if ttl != 0 {
+		t.Fatalf("ttl = %s, want 0 (no expiration when LRUIdleTTL=0)", ttl)
 	}
 }
 

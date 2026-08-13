@@ -40,6 +40,12 @@ load_config() {
     fi
   done
 
+  # Defaults: persistent storage on, dir /var/lib/garnet. Set
+  # GARNET_ENABLE_STORAGE=false for in-memory only.
+  : "${GARNET_ENABLE_STORAGE:=true}"
+  : "${GARNET_STORAGE_DIR:=/var/lib/garnet}"
+  export GARNET_ENABLE_STORAGE GARNET_STORAGE_DIR
+
   SERVICE_FILE="/etc/systemd/system/${GARNET_SERVICE_NAME}.service"
 }
 
@@ -101,6 +107,12 @@ if [[ "$GARNET_DISABLE_PUBSUB" == "true" ]]; then
   args+=(--no-pubsub)
 fi
 
+if [[ "$GARNET_ENABLE_STORAGE" == "true" ]]; then
+  # Persistent storage via write-ahead log. Garnet requires the logdir to exist.
+  install -d -m 0755 "$GARNET_STORAGE_DIR"
+  args+=(--aof --logdir "$GARNET_STORAGE_DIR")
+fi
+
 if [[ "$GARNET_AUTH_ENABLED" == "true" ]]; then
   if [[ -z "${GARNET_PASSWORD:-}" ]]; then
     echo "GARNET_PASSWORD is required when GARNET_AUTH_ENABLED=true" >&2
@@ -120,6 +132,15 @@ SCRIPT
 }
 
 write_service() {
+  # When persistent storage is enabled, the binary must be allowed to write to
+  # GARNET_STORAGE_DIR (default /var/lib/garnet). The unit grants ReadWritePaths
+  # for that dir; otherwise the path is left as the default ProtectSystem=strict
+  # allows no writes outside /var and /etc.
+  local rw_paths=""
+  if [[ "${GARNET_ENABLE_STORAGE:-true}" == "true" ]]; then
+    rw_paths="ReadWritePaths=${GARNET_STORAGE_DIR:-/var/lib/garnet}"
+  fi
+
   cat > "$SERVICE_FILE" <<SERVICE
 [Unit]
 Description=Garnet Cache Server
@@ -136,6 +157,7 @@ RestartSec=3
 TimeoutStartSec=180
 TimeoutStopSec=30
 LimitNOFILE=1048576
+$rw_paths
 
 [Install]
 WantedBy=multi-user.target

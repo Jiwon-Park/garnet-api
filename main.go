@@ -18,7 +18,6 @@ import (
 )
 
 const (
-	defaultLRUIdleTTL  = 1 * time.Hour
 	maxKeyLen          = 512
 	maxValueLen        = 1 << 20 // 1 MiB
 	translationPrefix  = "trans:"
@@ -173,15 +172,17 @@ func (s *server) get(c fiber.Ctx) error {
 	ctx, cancel := context.WithTimeout(context.Background(), s.cfg.RequestTTL)
 	defer cancel()
 
-	// TTL refresh on read is on by default: GETEX refreshes the key's TTL on every
-	// successful GET using the configured LRU idle TTL. This is the access-refreshed
-	// LRU eviction strategy (see README). When LRUIdleTTL is 0 we still use GETEX with
-	// the default idle TTL so recently used keys stay alive even without explicit config.
-	ttl := s.cfg.LRUIdleTTL
-	if ttl == 0 {
-		ttl = defaultLRUIdleTTL
+	// Access-refreshed LRU eviction: when LRUIdleTTL > 0, GETEX refreshes the key's
+	// idle TTL on every successful read so recently used keys stay alive and idle keys
+	// are expired by Garnet. When LRUIdleTTL is 0, no TTL is applied — keys live
+	// until explicitly deleted or expired via the per-request ttl_seconds.
+	var cmd *redis.StringCmd
+	if s.cfg.LRUIdleTTL > 0 {
+		cmd = s.db.GetEx(ctx, key, s.cfg.LRUIdleTTL)
+	} else {
+		cmd = s.db.Get(ctx, key)
 	}
-	value, err := s.db.GetEx(ctx, key, ttl).Result()
+	value, err := cmd.Result()
 	if errors.Is(err, redis.Nil) {
 		return fiber.NewError(fiber.StatusNotFound, "key not found")
 	}
@@ -313,10 +314,7 @@ func (s *server) ttlForSet(ttlSeconds *int64) (time.Duration, error) {
 		}
 		return time.Duration(*ttlSeconds) * time.Second, nil
 	}
-	if s.cfg.LRUIdleTTL > 0 {
-		return s.cfg.LRUIdleTTL, nil
-	}
-	return defaultLRUIdleTTL, nil
+	return s.cfg.LRUIdleTTL, nil
 }
 
 func validateKey(key string) error {

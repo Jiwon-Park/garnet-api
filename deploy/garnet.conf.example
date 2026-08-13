@@ -6,5 +6,7 @@
   "DisableObjects": true,
   "DisablePubSub": true,
   "CompactionFrequencySecs": 60,
-  "CompactionType": "Lookup"
+  "CompactionType": "Lookup",
+  "EnableStorage": true,
+  "LogDir": "/var/lib/garnet"
 }

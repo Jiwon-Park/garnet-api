@@ -44,6 +44,8 @@ jobs:
       GARNET_DISABLE_OBJECTS: ${{ vars.GARNET_DISABLE_OBJECTS }}
       GARNET_DISABLE_PUBSUB: ${{ vars.GARNET_DISABLE_PUBSUB }}
       GARNET_AUTH_ENABLED: ${{ vars.GARNET_AUTH_ENABLED }}
+      GARNET_ENABLE_STORAGE: ${{ vars.GARNET_ENABLE_STORAGE }}
+      GARNET_STORAGE_DIR: ${{ vars.GARNET_STORAGE_DIR }}
       GARNET_EXTRA_ARGS: ${{ vars.GARNET_EXTRA_ARGS }}
       GARNET_PASSWORD: ${{ secrets.GARNET_PASSWORD }}
     steps:
@@ -129,6 +131,8 @@ jobs:
             render_env GARNET_DISABLE_OBJECTS
             render_env GARNET_DISABLE_PUBSUB
             render_env GARNET_AUTH_ENABLED
+            render_env GARNET_ENABLE_STORAGE
+            render_env GARNET_STORAGE_DIR
             render_env GARNET_EXTRA_ARGS
             render_env GARNET_PASSWORD
           } > "$config_file"

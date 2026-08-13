@@ -23,8 +23,12 @@ gh variable set GARNET_COMPACTION_TYPE --repo Jiwon-Park/garnet-api --body "Look
 gh variable set GARNET_DISABLE_OBJECTS --repo Jiwon-Park/garnet-api --body "true"
 gh variable set GARNET_DISABLE_PUBSUB --repo Jiwon-Park/garnet-api --body "true"
 gh variable set GARNET_AUTH_ENABLED --repo Jiwon-Park/garnet-api --body "false"
+gh variable set GARNET_ENABLE_STORAGE --repo Jiwon-Park/garnet-api --body "true"
+gh variable set GARNET_STORAGE_DIR --repo Jiwon-Park/garnet-api --body "/var/lib/garnet"
 gh variable set GARNET_EXTRA_ARGS --repo Jiwon-Park/garnet-api --body ""
 ```
+
+`GARNET_ENABLE_STORAGE` defaults to `true` and adds `--aof --logdir` to the Garnet command so data survives restarts. The lifecycle script auto-creates `GARNET_STORAGE_DIR` (default `/var/lib/garnet`) and the systemd unit grants `ReadWritePaths` for it. Set to `false` for in-memory only.
 
 `GARNET_VERSION` is the Garnet release tag without the leading `v` (e.g. `2.1.4`). The workflow downloads `linux-<arch>-based.tar.xz` from `https://github.com/microsoft/garnet/releases/download/v<GARNET_VERSION>/` and verifies its SHA-256 against `GARNET_SHA256_X64` / `GARNET_SHA256_ARM64` depending on the target server's architecture. Look up the digests for a given release at the Garnet releases page.
 
