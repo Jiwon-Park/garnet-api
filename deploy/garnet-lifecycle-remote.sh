@@ -177,8 +177,7 @@ install_garnet() {
 
   local asset="linux-${arch}-based.tar.xz"
   local url="https://github.com/microsoft/garnet/releases/download/v${GARNET_VERSION}/${asset}"
-  local tmpdir
-  tmpdir="$(mktemp -d)"
+  local tmpdir="$(mktemp -d)"
   trap 'rm -rf "$tmpdir"' EXIT
 
   echo "Downloading $url"
