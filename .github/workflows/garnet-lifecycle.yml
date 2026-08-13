@@ -50,7 +50,7 @@ jobs:
       GARNET_PASSWORD: ${{ secrets.GARNET_PASSWORD }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Validate GitHub config
         shell: bash
