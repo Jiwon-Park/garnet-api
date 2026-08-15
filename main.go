@@ -5,14 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"os"
 	"os/signal"
-	"regexp"
 	"runtime"
 	"strconv"
 	"syscall"
 	"time"
-	"net/url"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/redis/go-redis/v9"
@@ -22,8 +21,6 @@ const (
 	maxKeyLen   = 4096
 	maxValueLen = 1 << 20 // 1 MiB
 )
-
-// var keyPattern = regexp.MustCompile(`^[A-Za-z0-9._:/@\-]+$`)
 
 type config struct {
 	Port            string
@@ -255,9 +252,6 @@ func validateKey(key string) error {
 	if len(key) > maxKeyLen {
 		return fmt.Errorf("key exceeds %d bytes", maxKeyLen)
 	}
-	// if !keyPattern.MatchString(key) {
-	// 	return errors.New("key may only contain alphanumeric, dot, underscore, colon, slash, at, or hyphen characters")
-	// }
 	return nil
 }
 
