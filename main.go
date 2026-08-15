@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"syscall"
 	"time"
+	"net/url"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/redis/go-redis/v9"
@@ -22,7 +23,7 @@ const (
 	maxValueLen = 1 << 20 // 1 MiB
 )
 
-var keyPattern = regexp.MustCompile(`^[A-Za-z0-9._:/@\-]+$`)
+// var keyPattern = regexp.MustCompile(`^[A-Za-z0-9._:/@\-]+$`)
 
 type config struct {
 	Port            string
@@ -148,7 +149,10 @@ func (s *server) health(c fiber.Ctx) error {
 }
 
 func (s *server) get(c fiber.Ctx) error {
-	key := c.Params("key")
+	key, err := url.PathUnescape(c.Params("key"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "invalid key")
+	}
 	if err := validateKey(key); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, err.Error())
 	}
@@ -178,7 +182,10 @@ func (s *server) get(c fiber.Ctx) error {
 }
 
 func (s *server) set(c fiber.Ctx) error {
-	key := c.Params("key")
+	key, err := url.PathUnescape(c.Params("key"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "invalid key")
+	}
 	if err := validateKey(key); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, err.Error())
 	}
@@ -212,7 +219,10 @@ func (s *server) set(c fiber.Ctx) error {
 }
 
 func (s *server) remove(c fiber.Ctx) error {
-	key := c.Params("key")
+	key, err := url.PathUnescape(c.Params("key"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "invalid key")
+	}
 	if err := validateKey(key); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, err.Error())
 	}
