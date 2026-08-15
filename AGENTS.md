@@ -18,8 +18,7 @@
 - Access-refreshed TTL (`LRU_IDLE_TTL_SECONDS`) is intentional: Garnet config does not expose Redis `maxmemory-policy allkeys-lru`, so `GETEX` on get and `ttlForSet` on set provide LRU-style expiration when LRUIdleTTL &gt; 0. Do not replace with a Redis LRU policy.
 - `LRU_IDLE_TTL_SECONDS=0` means **no expiration** — neither GETEX refresh nor per-key TTL is applied; keys live until explicitly deleted. Do not reintroduce a default TTL fallback.
 - `setRequest.Value` and `TTLSeconds` are pointers so missing fields are distinguishable from zero values — preserve this when editing DTOs.
-- API surface is intentionally minimal: only `GET /healthz`, `GET /keys/:key`, `PUT /keys/:key`. No DELETE, no translate — clients do delete by writing a short TTL, and translation caching by writing `trans:<text>` and `used:<text>` keys directly.
-- Keys are validated by `validateKey` (`maxKeyLen` 512, charset `[A-Za-z0-9._:/@-]`); set values are capped at `maxValueLen` (1 MiB) and must be non-empty. Bump the constants when intentional.
+- API surface: `GET /healthz`, `GET /keys/:key`, `PUT /keys/:key`, `DELETE /keys/:key`. No translate endpoint — translation is handled client-side via `trans:`/`used:` key prefixes. Set values are capped at `maxValueLen` (1 MiB) and must be non-empty. Bump the constants when intentional.
 - Logging uses stdlib `log/slog` (text handler, leveled). Do not reintroduce `log.Printf`.
 
 ## Release flow

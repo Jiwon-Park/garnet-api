@@ -25,7 +25,7 @@ PUT /keys/{key}
 
 `ttl_seconds` is optional. If omitted, the configured `LRU_IDLE_TTL_SECONDS` is used; if both are `0`, no TTL is applied (key lives until explicitly deleted or until Garnet's persistent storage is wiped).
 
-> There is no `DELETE` route. If you need to remove a key, set it with a 1-second `ttl_seconds` and let it expire, or delete it directly from Garnet.
+> The API supports `DELETE /keys/{key}` for direct key removal. You can also remove a key by writing it with a 1-second `ttl_seconds` on SET.
 
 ### Key validation
 

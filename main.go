@@ -52,8 +52,8 @@ type valueResponse struct {
 }
 
 type statusResponse struct {
-	Key    string `json:"key"`
-	Status string `json:"status,omitempty"`
+	Key     string `json:"key"`
+	Status  string `json:"status,omitempty"`
 	Removed bool   `json:"removed,omitempty"`
 }
 

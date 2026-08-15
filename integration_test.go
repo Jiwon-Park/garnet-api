@@ -266,6 +266,55 @@ func TestIntegration_SetGet(t *testing.T) {
 	}
 }
 
+func TestIntegration_SetGetDelete(t *testing.T) {
+	e := newIntegrationEnv(t)
+
+	// Set
+	status, body := e.do(t, http.MethodPut, "/keys/test-key", setRequest{Value: valPtr("hello"), TTLSeconds: intPtr(60)})
+	if status != 200 {
+		t.Fatalf("set status = %d (body=%s)", status, string(body))
+	}
+	sr := decode[statusResponse](t, body)
+	if sr.Status != "ok" {
+		t.Fatalf("set response = %+v", sr)
+	}
+
+	// Key exists right now
+	exists, err := e.rdb.Exists(context.Background(), "test-key").Result()
+	if err != nil {
+		t.Fatalf("exists: %v", err)
+	}
+	if exists != 1 {
+		t.Fatalf("key should exist immediately after set; exists=%d", exists)
+	}
+
+	// Delete
+	status, body = e.do(t, http.MethodDelete, "/keys/test-key", nil)
+	if status != 200 {
+		t.Fatalf("delete status = %d (body=%s)", status, string(body))
+	}
+	dr := decode[statusResponse](t, body)
+	if !dr.Removed {
+		t.Fatalf("delete removed = false, want true")
+	}
+
+	// Key no longer exists
+	exists, err = e.rdb.Exists(context.Background(), "test-key").Result()
+	if err != nil {
+		t.Fatalf("exists after delete: %v", err)
+	}
+	if exists != 0 {
+		t.Fatalf("key should be deleted; exists=%d", exists)
+	}
+
+	// Delete again → removed=false
+	status, body = e.do(t, http.MethodDelete, "/keys/test-key", nil)
+	dr = decode[statusResponse](t, body)
+	if dr.Removed {
+		t.Fatalf("re-delete removed=true, want false")
+	}
+}
+
 func TestIntegration_SetValidation(t *testing.T) {
 	e := newIntegrationEnv(t)
 
