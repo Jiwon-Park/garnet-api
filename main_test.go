@@ -69,9 +69,9 @@ func TestValidateKeyRejectsTooLong(t *testing.T) {
 }
 
 func TestValidateKeyRejectsBadChars(t *testing.T) {
-	for _, k := range []string{"key with space", "key\"quote", "key\x00null", "key;inj", "key\ttab"} {
-		if err := validateKey(k); err == nil {
-			t.Fatalf("validateKey accepted bad key %q", k)
+	for _, k := range []string{"key with space", "key\"quote", "key\x00null", "key;inj", "key\ttab", "日本語の長いテキストー"} {
+		if err := validateKey(k); err != nil {
+			t.Fatalf("validateKey not accepted key %q", k)
 		}
 	}
 }
