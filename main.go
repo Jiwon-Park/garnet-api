@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	maxKeyLen   = 512
+	maxKeyLen   = 4096
 	maxValueLen = 1 << 20 // 1 MiB
 )
 
@@ -245,9 +245,9 @@ func validateKey(key string) error {
 	if len(key) > maxKeyLen {
 		return fmt.Errorf("key exceeds %d bytes", maxKeyLen)
 	}
-	if !keyPattern.MatchString(key) {
-		return errors.New("key may only contain alphanumeric, dot, underscore, colon, slash, at, or hyphen characters")
-	}
+	// if !keyPattern.MatchString(key) {
+	// 	return errors.New("key may only contain alphanumeric, dot, underscore, colon, slash, at, or hyphen characters")
+	// }
 	return nil
 }
 
