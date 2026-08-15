@@ -110,7 +110,7 @@ fi
 if [[ "$GARNET_ENABLE_STORAGE" == "true" ]]; then
   # Persistent storage via write-ahead log. Garnet requires the logdir to exist.
   install -d -m 0755 "$GARNET_STORAGE_DIR"
-  args+=(--aof --logdir "$GARNET_STORAGE_DIR")
+  args+=(--aof --logdir --storage-tier "$GARNET_STORAGE_DIR")
 fi
 
 if [[ "$GARNET_AUTH_ENABLED" == "true" ]]; then
