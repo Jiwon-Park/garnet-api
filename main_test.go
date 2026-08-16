@@ -73,12 +73,12 @@ func TestValidateKeyRejectsBadChars(t *testing.T) {
 		if err := validateKey(k); err != nil {
 			t.Fatalf("validateKey not accepted key %q", k)
 		}
-	}	
+	}
 }
 
 func TestValidateKeyRejectsBadChars(t *testing.T) {
 	var k = "日本語の長いテキストー"
-	if err := validateValue(k,k); err == nil {
+	if err := validateValue(k, k); err == nil {
 		t.Fatalf("validateKey accepted value %q", k)
 	}
 }
