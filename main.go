@@ -24,7 +24,7 @@ const (
 )
 
 var (
-	japaneseRegex = regexp.MustCompile(`[\p{Hiragana}\p{Katakana}\p{Han}]`)
+	japaneseRegex = regexp.MustCompile(`[\p{Hiragana}\p{Katakana}]`)
 )
 
 type config struct {
@@ -267,7 +267,7 @@ func validateValue(val string) error {
 		return errors.New("value must not be empty")
 	}
 	if japaneseRegex.MatchString(val) {
-		return errors.New("value must not contain japanese or CJK ideographs.")
+		return errors.New("value must not contain japanese ganas.")
 	}
 	return nil
 }
