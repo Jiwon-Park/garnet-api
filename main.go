@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"regexp"
 	"runtime"
 	"strconv"
 	"syscall"
@@ -20,6 +21,10 @@ import (
 const (
 	maxKeyLen   = 4096
 	maxValueLen = 1 << 20 // 1 MiB
+)
+
+var (
+	japaneseRegex = regexp.MustCompile(`[\p{Hiragana}\p{Katakana}\p{Han}]`)
 )
 
 type config struct {
@@ -200,7 +205,9 @@ func (s *server) set(c fiber.Ctx) error {
 	if len(*req.Value) > maxValueLen {
 		return fiber.NewError(fiber.StatusBadRequest, fmt.Sprintf("value exceeds %d bytes", maxValueLen))
 	}
-
+	if err := validateValue(*req.Value); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, err.Error())
+	}
 	ttl, err := s.ttlForSet(req.TTLSeconds)
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, err.Error())
@@ -251,6 +258,16 @@ func validateKey(key string) error {
 	}
 	if len(key) > maxKeyLen {
 		return fmt.Errorf("key exceeds %d bytes", maxKeyLen)
+	}
+	return nil
+}
+
+func validateValue(val string) error {
+	if val == "" {
+		return errors.New("value must not be empty")
+	}
+	if japaneseRegex.MatchString(val) {
+		return errors.New("value must not contain japanese or CJK ideographs.")
 	}
 	return nil
 }
