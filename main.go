@@ -48,7 +48,17 @@ type setRequest struct {
 	Value      *string `json:"value"`
 	TTLSeconds *int64  `json:"ttl_seconds,omitempty"`
 }
+type batchRequest struct {
+	Type  string      `json:"type"`
+	Keys  []string    `json:"keys,omitempty"`
+	Items []batchItem `json:"items,omitempty"`
+}
 
+type batchItem struct {
+	Key        string `json:"key"`
+	Value      string `json:"value"`
+	TTLSeconds *int64 `json:"ttl_seconds,omitempty"`
+}
 type valueResponse struct {
 	Key   string `json:"key"`
 	Value string `json:"value"`
@@ -63,6 +73,21 @@ type statusResponse struct {
 type healthResponse struct {
 	Status string `json:"status"`
 	Garnet string `json:"garnet"`
+}
+type batchGetResponse struct {
+	Key   string `json:"key"`
+	Value string `json:"value,omitempty"`
+	Found bool   `json:"found"`
+}
+
+type batchSetResponse struct {
+	Key    string `json:"key"`
+	Status string `json:"status"`
+}
+
+type batchResponse struct {
+	Type  string `json:"type"`
+	Items any    `json:"items"`
 }
 
 func main() {
@@ -137,6 +162,7 @@ func newApp(srv *server) *fiber.App {
 	app.Get("/keys/:key", srv.get)
 	app.Put("/keys/:key", srv.set)
 	app.Delete("/keys/:key", srv.remove)
+	app.Post("/keys", srv.batch)
 	return app
 }
 
@@ -199,12 +225,6 @@ func (s *server) set(c fiber.Ctx) error {
 	if req.Value == nil {
 		return fiber.NewError(fiber.StatusBadRequest, "value is required")
 	}
-	if len(*req.Value) == 0 {
-		return fiber.NewError(fiber.StatusBadRequest, "value must not be empty")
-	}
-	if len(*req.Value) > maxValueLen {
-		return fiber.NewError(fiber.StatusBadRequest, fmt.Sprintf("value exceeds %d bytes", maxValueLen))
-	}
 	if err := validateValue(*req.Value); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, err.Error())
 	}
@@ -241,7 +261,190 @@ func (s *server) remove(c fiber.Ctx) error {
 
 	return c.JSON(statusResponse{Key: key, Removed: count > 0})
 }
+func (s *server) batch(c fiber.Ctx) error {
+	var req batchRequest
 
+	if err := c.Bind().Body(&req); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "invalid json body")
+	}
+
+	switch req.Type {
+	case "get":
+		return s.batchGet(c, req.Keys)
+
+	case "set":
+		return s.batchSet(c, req.Items)
+
+	default:
+		return fiber.NewError(
+			fiber.StatusBadRequest,
+			"type must be either 'get' or 'set'",
+		)
+	}
+}
+func (s *server) batchGet(c fiber.Ctx, keys []string) error {
+	if len(keys) == 0 {
+		return fiber.NewError(
+			fiber.StatusBadRequest,
+			"keys must not be empty",
+		)
+	}
+
+	if len(keys) > 4096 {
+		return fiber.NewError(
+			fiber.StatusBadRequest,
+			"too many keys",
+		)
+	}
+
+	for _, key := range keys {
+		if err := validateKey(key); err != nil {
+			return fiber.NewError(
+				fiber.StatusBadRequest,
+				err.Error(),
+			)
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(
+		context.Background(),
+		s.cfg.RequestTTL,
+	)
+	defer cancel()
+
+	pipe := s.db.Pipeline()
+
+	cmds := make([]*redis.StringCmd, len(keys))
+
+	for i, key := range keys {
+		if s.cfg.LRUIdleTTL > 0 {
+			cmds[i] = pipe.GetEx(ctx, key, s.cfg.LRUIdleTTL)
+		} else {
+			cmds[i] = pipe.Get(ctx, key)
+		}
+	}
+
+	if _, err := pipe.Exec(ctx); err != nil {
+		// redis.Nil은 개별 키 miss이므로 전체 실패로 처리하지 않는다.
+		if !errors.Is(err, redis.Nil) {
+			return fiber.NewError(
+				fiber.StatusBadGateway,
+				err.Error(),
+			)
+		}
+	}
+
+	result := make([]batchGetResponse, len(keys))
+
+	for i, cmd := range cmds {
+		value, err := cmd.Result()
+
+		switch {
+		case err == nil:
+			result[i] = batchGetResponse{
+				Key:   keys[i],
+				Value: value,
+				Found: true,
+			}
+
+		case errors.Is(err, redis.Nil):
+			result[i] = batchGetResponse{
+				Key:   keys[i],
+				Found: false,
+			}
+
+		default:
+			return fiber.NewError(
+				fiber.StatusBadGateway,
+				err.Error(),
+			)
+		}
+	}
+
+	return c.JSON(batchResponse{
+		Type:  "get",
+		Items: result,
+	})
+}
+func (s *server) batchSet(c fiber.Ctx, items []batchItem) error {
+	if len(items) == 0 {
+		return fiber.NewError(
+			fiber.StatusBadRequest,
+			"items must not be empty",
+		)
+	}
+
+	if len(items) > 4096 {
+		return fiber.NewError(
+			fiber.StatusBadRequest,
+			"too many items",
+		)
+	}
+
+	for _, item := range items {
+		if err := validateKey(item.Key); err != nil {
+			return fiber.NewError(
+				fiber.StatusBadRequest,
+				err.Error(),
+			)
+		}
+
+		if err := validateValue(item.Value); err != nil {
+			return fiber.NewError(
+				fiber.StatusBadRequest,
+				err.Error(),
+			)
+		}
+
+		if item.TTLSeconds != nil && *item.TTLSeconds < 0 {
+			return fiber.NewError(
+				fiber.StatusBadRequest,
+				"ttl_seconds must be greater than or equal to 0",
+			)
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(
+		context.Background(),
+		s.cfg.RequestTTL,
+	)
+	defer cancel()
+
+	pipe := s.db.Pipeline()
+
+	for _, item := range items {
+		ttl, err := s.ttlForSet(item.TTLSeconds)
+		if err != nil {
+			return fiber.NewError(
+				fiber.StatusBadRequest,
+				err.Error(),
+			)
+		}
+
+		pipe.Set(ctx, item.Key, item.Value, ttl)
+	}
+
+	if _, err := pipe.Exec(ctx); err != nil {
+		return fiber.NewError(
+			fiber.StatusBadGateway,
+			err.Error(),
+		)
+	}
+
+	result := make([]batchSetResponse, len(items))
+
+	for i := range items {
+		result[i] = batchSetResponse{
+			Key:    items[i].Key,
+			Status: "ok",
+		}
+	}
+
+	return c.JSON(batchResponse{
+		Type:  "set",
+		Items: result,
+	})
+}
 func (s *server) ttlForSet(ttlSeconds *int64) (time.Duration, error) {
 	if ttlSeconds != nil {
 		if *ttlSeconds < 0 {
@@ -266,6 +469,14 @@ func validateValue(val string) error {
 	if val == "" {
 		return errors.New("value must not be empty")
 	}
+	if len(val) > maxValueLen {
+		return errors.New(
+			fmt.Sprintf(
+				"value exceeds %d bytes",
+				maxValueLen,
+			),
+		)
+	}
 	if japaneseRegex.MatchString(val) {
 		return errors.New("value must not contain japanese ganas.")
 	}
@@ -281,7 +492,7 @@ func loadConfig() config {
 		GarnetDB:        envInt("GARNET_DB", 0),
 		RequestTTL:      time.Duration(envInt("REQUEST_TIMEOUT_MS", 500)) * time.Millisecond,
 		LRUIdleTTL:      time.Duration(envInt("LRU_IDLE_TTL_SECONDS", 0)) * time.Second,
-		RedisPoolSize:   envInt("REDIS_POOL_SIZE", cpus*32),
+		RedisPoolSize:   envInt("REDIS_POOL_SIZE", cpus*4),
 		HTTPConcurrency: envInt("HTTP_CONCURRENCY", 256*1024),
 	}
 }
