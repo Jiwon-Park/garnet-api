@@ -82,7 +82,7 @@ At runtime the binary looks for `libhdTransEngine.so` next to itself (`-rpath $O
 
 ## GitHub Actions Release
 
-Release runs on GitHub-hosted Ubuntu runners. Build and release artifacts are created on GitHub; only copying the binary and restarting systemd happen on your server.
+Release runs on GitHub-hosted Ubuntu runners (amd64 and arm64). Each release package `garnet-api-linux-<arch>.tar.gz` contains the binary, `libhdTransEngine.so` and `hdtrans-data/`; the deploy step copies all three into `DEPLOY_PATH`. The hdTrans version comes from the `HDTRANS_REF` repository variable (default `v0.9.5`). Build and release artifacts are created on GitHub; only copying the binary and restarting systemd happen on your server.
 
 Required GitHub repository or environment variables:
 

@@ -24,7 +24,7 @@
 
 ## Release flow
 
-- Releases are triggered only by pushing a `v*.*.*` tag (`git tag vX.Y.Z && git push origin vX.Y.Z`). CI builds linux amd64+arm64, publishes a GitHub release, then SSH-deploys and restarts the systemd service.
+- Releases are triggered only by pushing a `v*.*.*` tag (`git tag vX.Y.Z && git push origin vX.Y.Z`). CI builds linux amd64+arm64 natively (`ubuntu-latest`, `ubuntu-24.04-arm`) with cgo: it builds hdTrans at `HDTRANS_REF` (repo variable, default `v0.9.5`), compiles its dictionary snapshot, and packages `garnet-api-linux-<arch>.tar.gz` (binary + `libhdTransEngine.so` + `hdtrans-data/`). It publishes that package as a GitHub release, then SSH-deploys it into `DEPLOY_PATH` and restarts the systemd service.
 - Deployment requires GitHub Variables (`DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_PATH`, `DEPLOY_SERVICE`) and secret `DEPLOY_SSH_KEY`; see `docs/github-actions-config.md` for the full list.
 - Garnet itself is managed separately via the `Garnet Lifecycle` workflow (`install|start|restart|stop|status`), not by the release workflow.
 - Garnet runs as a native binary under systemd (no Docker). The lifecycle workflow downloads `linux-<arch>-based.tar.xz` from the Garnet release, verifies SHA-256 against `GARNET_SHA256_X64`/`GARNET_SHA256_ARM64`, and installs the `GarnetServer` binary to `/opt/garnet/`. `GARNET_VERSION` is the tag without the leading `v`. To upgrade Garnet, update `GARNET_VERSION` plus both `GARNET_SHA256_*` GitHub Variables and re-run the `install` command.
