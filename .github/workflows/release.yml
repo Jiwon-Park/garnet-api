@@ -70,17 +70,24 @@ jobs:
         env:
           CGO_ENABLED: "1"
           CGO_LDFLAGS: -L${{ github.workspace }}/hdtrans/build/linux
+          USERDICT_PASSWORD: ${{ secrets.USERDICT_PASSWORD }}
         run: |
           mkdir -p dist/pkg
           GOOS=linux GOARCH=${{ matrix.goarch }} go build -trimpath -ldflags="-s -w" -o dist/pkg/${APP_NAME} .
           cp hdtrans/build/linux/libhdTransEngine.so dist/pkg/
           cp -r hdtrans/build/linux/hdtrans-data dist/pkg/
-          # User dictionary (optional): userdict/userdict.txt is read by the engine from hdtrans-data/user/.
-          if [ -f userdict/userdict.txt ]; then
-            cp userdict/userdict.txt dist/pkg/hdtrans-data/user/userdict.txt
-            echo "user dictionary: $(grep -vc '^#' userdict/userdict.txt) entries"
+          # User dictionary (optional): userdict/userdict.txt.enc is decrypted into hdtrans-data/user/,
+          # where the engine reads it. The password comes from the USERDICT_PASSWORD secret.
+          if [ -f userdict/userdict.txt.enc ]; then
+            if [ -z "$USERDICT_PASSWORD" ]; then
+              echo "::error::USERDICT_PASSWORD secret is not set"
+              exit 1
+            fi
+            openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:USERDICT_PASSWORD \
+              -in userdict/userdict.txt.enc -out dist/pkg/hdtrans-data/user/userdict.txt
+            echo "user dictionary: $(grep -vc '^#' dist/pkg/hdtrans-data/user/userdict.txt) entries"
           else
-            echo "user dictionary: none (userdict/userdict.txt not found)"
+            echo "user dictionary: none (userdict/userdict.txt.enc not found)"
           fi
           chmod 0644 dist/pkg/libhdTransEngine.so
           chmod -R a+rX dist/pkg/hdtrans-data
