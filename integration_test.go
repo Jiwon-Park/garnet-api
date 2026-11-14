@@ -206,24 +206,32 @@ func decode[T any](t *testing.T, b []byte) T {
 	return v
 }
 
+// batchGetEnvelope is the POST /keys (type get) reply.
+type batchGetEnvelope struct {
+	Type  string             `json:"type"`
+	Items []batchGetResponse `json:"items"`
+}
+
+// read fetches one key through POST /keys (batch get). The API has no GET routes.
+func (e *integrationEnv) read(t *testing.T, key string) (int, batchGetResponse) {
+	t.Helper()
+	status, body := e.do(t, http.MethodPost, "/keys", batchRequest{Type: "get", Keys: []string{key}})
+	if status != 200 {
+		return status, batchGetResponse{}
+	}
+	env := decode[batchGetEnvelope](t, body)
+	if len(env.Items) != 1 {
+		t.Fatalf("read %q: %d items, want 1", key, len(env.Items))
+	}
+	return status, env.Items[0]
+}
+
 func valPtr(s string) *string { return &s }
 func intPtr(i int64) *int64   { return &i }
 
 // ============================================================
 // Tests
 // ============================================================
-
-func TestIntegration_Health(t *testing.T) {
-	e := newIntegrationEnv(t)
-	status, body := e.do(t, http.MethodGet, "/healthz", nil)
-	if status != 200 {
-		t.Fatalf("health status = %d, want 200 (body=%s)", status, string(body))
-	}
-	r := decode[healthResponse](t, body)
-	if r.Status != "ok" || r.Garnet != "pong" {
-		t.Fatalf("health response = %+v, want ok/pong", r)
-	}
-}
 
 func TestIntegration_SetGet(t *testing.T) {
 	e := newIntegrationEnv(t)
@@ -238,20 +246,16 @@ func TestIntegration_SetGet(t *testing.T) {
 		t.Fatalf("set response = %+v", sr)
 	}
 
-	// Get
-	status, body = e.do(t, http.MethodGet, "/keys/test-key", nil)
-	if status != 200 {
-		t.Fatalf("get status = %d (body=%s)", status, string(body))
-	}
-	gr := decode[valueResponse](t, body)
-	if gr.Key != "test-key" || gr.Value != "hello" {
-		t.Fatalf("get response = %+v, want key=test-key value=hello", gr)
+	// Get (batch read over POST /keys)
+	status, item := e.read(t, "test-key")
+	if status != 200 || !item.Found || item.Value != "hello" {
+		t.Fatalf("read status = %d item = %+v, want found value=hello", status, item)
 	}
 
-	// Get missing
-	status, _ = e.do(t, http.MethodGet, "/keys/nope", nil)
-	if status != 404 {
-		t.Fatalf("get missing status = %d, want 404", status)
+	// Missing key
+	status, item = e.read(t, "nope")
+	if status != 200 || item.Found {
+		t.Fatalf("read missing status = %d item = %+v, want not found", status, item)
 	}
 
 	// Overwrite: PUT on the same key replaces the value
@@ -259,10 +263,9 @@ func TestIntegration_SetGet(t *testing.T) {
 	if status != 200 {
 		t.Fatalf("overwrite status = %d", status)
 	}
-	status, body = e.do(t, http.MethodGet, "/keys/test-key", nil)
-	gr = decode[valueResponse](t, body)
-	if gr.Value != "world" {
-		t.Fatalf("overwrite value = %q, want world", gr.Value)
+	_, item = e.read(t, "test-key")
+	if item.Value != "world" {
+		t.Fatalf("overwrite value = %q, want world", item.Value)
 	}
 }
 
@@ -342,14 +345,14 @@ func TestIntegration_KeyValidation(t *testing.T) {
 	// Only keys that an HTTP client can build a request URL for; control characters
 	// (NUL, tab) can't be placed in a URL and are covered by main_test.go unit cases.
 	for _, key := range []string{"bad key", `key"quote`, "key;inj"} {
-		status, _ := e.do(t, http.MethodGet, "/keys/"+key, nil)
+		status, _ := e.read(t, key)
 		if status != 400 {
-			t.Fatalf("get bad key %q status = %d, want 400", key, status)
+			t.Fatalf("read bad key %q status = %d, want 400", key, status)
 		}
 	}
 }
 
-func TestIntegration_GetRefreshesTTL(t *testing.T) {
+func TestIntegration_ReadRefreshesTTL(t *testing.T) {
 	e := newIntegrationEnv(t)
 
 	// Set with 1s TTL, then sleep ~700ms, GETEX should refresh the TTL back to ~500ms
@@ -368,9 +371,9 @@ func TestIntegration_GetRefreshesTTL(t *testing.T) {
 		t.Fatalf("key expired before read; ttl=%v", ttlBefore)
 	}
 
-	status, _ = e.do(t, http.MethodGet, "/keys/ttl", nil)
+	status, _ = e.read(t, "ttl")
 	if status != 200 {
-		t.Fatalf("get status = %d", status)
+		t.Fatalf("read status = %d", status)
 	}
 	ttlAfter, err := e.rdb.PTTL(context.Background(), "ttl").Result()
 	if err != nil {
@@ -411,8 +414,8 @@ func TestIntegration_TTLExpireDeletion(t *testing.T) {
 		t.Fatalf("key should be expired; exists=%d", exists)
 	}
 
-	status, _ = e.do(t, http.MethodGet, "/keys/expiring", nil)
-	if status != 404 {
-		t.Fatalf("get expired status = %d, want 404", status)
+	_, item := e.read(t, "expiring")
+	if item.Found {
+		t.Fatalf("expired key still found: %+v", item)
 	}
 }

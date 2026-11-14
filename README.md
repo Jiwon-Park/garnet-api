@@ -5,8 +5,6 @@ Lightweight GoFiber API server: a key-value API over Garnet, plus `POST /transla
 ## API
 
 ```http
-GET /healthz
-GET /keys/{key}
 PUT /keys/{key}
 DELETE /keys/{key}
 POST /keys
@@ -40,7 +38,7 @@ Response: `{"text": "오늘은 책을 읽습니다.\n고기가 지글지글 구�
 
 ### Operations
 
-**`GET /keys/{key}`** — read. Returns the value as JSON. When `LRU_IDLE_TTL_SECONDS` is non-zero, the key's idle TTL is refreshed (GETEX) on every successful read; when `0`, no TTL is touched.
+**Reads** go through `POST /keys` with `{"type": "get", "keys": ["k1", "k2"]}`. Each item returns `key`, `value` and `found`. When `LRU_IDLE_TTL_SECONDS` is non-zero, the idle TTL of each read key is refreshed (GETEX); when `0`, no TTL is touched. The API has no GET routes: intermediaries in front of the service drop GET requests.
 
 **`PUT /keys/{key}`** — write. Replaces the value. Body:
 
