@@ -75,6 +75,13 @@ jobs:
           GOOS=linux GOARCH=${{ matrix.goarch }} go build -trimpath -ldflags="-s -w" -o dist/pkg/${APP_NAME} .
           cp hdtrans/build/linux/libhdTransEngine.so dist/pkg/
           cp -r hdtrans/build/linux/hdtrans-data dist/pkg/
+          # User dictionary (optional): userdict/userdict.txt is read by the engine from hdtrans-data/user/.
+          if [ -f userdict/userdict.txt ]; then
+            cp userdict/userdict.txt dist/pkg/hdtrans-data/user/userdict.txt
+            echo "user dictionary: $(grep -vc '^#' userdict/userdict.txt) entries"
+          else
+            echo "user dictionary: none (userdict/userdict.txt not found)"
+          fi
           chmod 0644 dist/pkg/libhdTransEngine.so
           chmod -R a+rX dist/pkg/hdtrans-data
           tar -C dist/pkg -czf dist/${APP_NAME}-linux-${{ matrix.goarch }}.tar.gz ${APP_NAME} libhdTransEngine.so hdtrans-data
