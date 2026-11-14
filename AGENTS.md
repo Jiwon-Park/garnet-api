@@ -2,13 +2,14 @@
 
 ## Stack
 
-- Single-binary Go 1.25 app using GoFiber v3 and `go-redis/v9` to talk to a Garnet RESP endpoint. All source is in `main.go`; there are no subpackages.
+- Single-binary Go 1.25 app using GoFiber v3 and `go-redis/v9` to talk to a Garnet RESP endpoint, plus cgo bindings to `libhdTransEngine` (hdTrans C API) for `/translate`. Source is in `main.go` (KV) and `translate*.go` (translation); there are no subpackages.
 
 ## Commands
 
 - `go mod tidy` — keep `go.mod`/`go.sum` in sync before building.
 - `go test ./...` — run all tests.
 - `go run .` — start the server locally (listens on `PORT`, default 3000).
+- `/translate` requires cgo with `CGO_LDFLAGS=-L<dir of libhdTransEngine.so>` at build time and the library plus `hdtrans-data/` beside the binary at run time. `CGO_ENABLED=0` builds without translation (route returns 503).
 - `gofmt -l .` must return empty; CI fails the build on unformatted files. Match existing style (tabs, no trailing newline changes).
 
 ## Conventions that differ from defaults
@@ -18,12 +19,12 @@
 - Access-refreshed TTL (`LRU_IDLE_TTL_SECONDS`) is intentional: Garnet config does not expose Redis `maxmemory-policy allkeys-lru`, so `GETEX` on get and `ttlForSet` on set provide LRU-style expiration when LRUIdleTTL &gt; 0. Do not replace with a Redis LRU policy.
 - `LRU_IDLE_TTL_SECONDS=0` means **no expiration** — neither GETEX refresh nor per-key TTL is applied; keys live until explicitly deleted. Do not reintroduce a default TTL fallback.
 - `setRequest.Value` and `TTLSeconds` are pointers so missing fields are distinguishable from zero values — preserve this when editing DTOs.
-- API surface: `GET /healthz`, `GET /keys/:key`, `PUT /keys/:key`, `DELETE /keys/:key`. No translate endpoint — translation is handled client-side via `trans:`/`used:` key prefixes. Set values are capped at `maxValueLen` (1 MiB) and must be non-empty. Bump the constants when intentional.
+- API surface: `GET /healthz`, `GET /keys/:key`, `PUT /keys/:key`, `DELETE /keys/:key`, `POST /keys`, `POST /translate`. The engine is process-wide: `translator` loads it once via `sync.Once` in `newTranslator`; do not dlopen or re-initialize per request. Calls run concurrently, bounded by `TRANSLATE_WORKERS`. Set values are capped at `maxValueLen` (1 MiB) and must be non-empty. Bump the constants when intentional.
 - Logging uses stdlib `log/slog` (text handler, leveled). Do not reintroduce `log.Printf`.
 
 ## Release flow
 
-- Releases are triggered only by pushing a `v*.*.*` tag (`git tag vX.Y.Z && git push origin vX.Y.Z`). CI builds linux amd64+arm64, publishes a GitHub release, then SSH-deploys and restarts the systemd service.
+- Releases are triggered only by pushing a `v*.*.*` tag (`git tag vX.Y.Z && git push origin vX.Y.Z`). CI builds linux amd64+arm64 natively (`ubuntu-latest`, `ubuntu-24.04-arm`) with cgo: it builds hdTrans at `HDTRANS_REF` (repo variable, default `v0.9.5`), compiles its dictionary snapshot, and packages `garnet-api-linux-<arch>.tar.gz` (binary + `libhdTransEngine.so` + `hdtrans-data/`). It publishes that package as a GitHub release, then SSH-deploys it into `DEPLOY_PATH` and restarts the systemd service.
 - Deployment requires GitHub Variables (`DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_PATH`, `DEPLOY_SERVICE`) and secret `DEPLOY_SSH_KEY`; see `docs/github-actions-config.md` for the full list.
 - Garnet itself is managed separately via the `Garnet Lifecycle` workflow (`install|start|restart|stop|status`), not by the release workflow.
 - Garnet runs as a native binary under systemd (no Docker). The lifecycle workflow downloads `linux-<arch>-based.tar.xz` from the Garnet release, verifies SHA-256 against `GARNET_SHA256_X64`/`GARNET_SHA256_ARM64`, and installs the `GarnetServer` binary to `/opt/garnet/`. `GARNET_VERSION` is the tag without the leading `v`. To upgrade Garnet, update `GARNET_VERSION` plus both `GARNET_SHA256_*` GitHub Variables and re-run the `install` command.

@@ -11,14 +11,36 @@ permissions:
 
 env:
   APP_NAME: garnet-api
+  # hdTrans engine source built into libhdTransEngine.so. Pin with the HDTRANS_REF repository variable.
+  HDTRANS_REPO: sokcuri/hdTrans
+  HDTRANS_REF: ${{ vars.HDTRANS_REF || 'v0.9.5' }}
 
 jobs:
-  verify-build:
-    name: Verify and build
-    runs-on: ubuntu-latest
+  build:
+    name: Build linux ${{ matrix.goarch }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        include:
+          - goarch: amd64
+            runner: ubuntu-latest
+          - goarch: arm64
+            runner: ubuntu-24.04-arm
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+
+      - name: Checkout hdTrans
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ env.HDTRANS_REPO }}
+          ref: ${{ env.HDTRANS_REF }}
+          path: hdtrans
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ninja-build
 
       - name: Setup Go
         uses: actions/setup-go@v7
@@ -26,40 +48,65 @@ jobs:
           go-version: "1.25.x"
           cache: true
 
+      - name: Build hdTrans engine and dictionary snapshot
+        working-directory: hdtrans
+        run: |
+          cmake --preset linux
+          cmake --build --preset linux --parallel
+          mkdir -p build/linux/hdtrans-data
+          build/linux/hdtrans --dicts dicts --compile-snapshot "$PWD/build/linux/hdtrans-data/dicts.hdsnap"
+
       - name: Check formatting
         run: test -z "$(gofmt -l .)"
 
       - name: Test
+        env:
+          CGO_ENABLED: "1"
+          CGO_LDFLAGS: -L${{ github.workspace }}/hdtrans/build/linux
+          LD_LIBRARY_PATH: ${{ github.workspace }}/hdtrans/build/linux
         run: go test ./...
 
-      - name: Build linux amd64 and arm64
+      - name: Build package
+        env:
+          CGO_ENABLED: "1"
+          CGO_LDFLAGS: -L${{ github.workspace }}/hdtrans/build/linux
         run: |
-          mkdir -p dist
-          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o dist/${APP_NAME}-linux-amd64 .
-          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags="-s -w" -o dist/${APP_NAME}-linux-arm64 .
+          mkdir -p dist/pkg
+          GOOS=linux GOARCH=${{ matrix.goarch }} go build -trimpath -ldflags="-s -w" -o dist/pkg/${APP_NAME} .
+          cp hdtrans/build/linux/libhdTransEngine.so dist/pkg/
+          cp -r hdtrans/build/linux/hdtrans-data dist/pkg/
+          chmod 0644 dist/pkg/libhdTransEngine.so
+          chmod -R a+rX dist/pkg/hdtrans-data
+          tar -C dist/pkg -czf dist/${APP_NAME}-linux-${{ matrix.goarch }}.tar.gz ${APP_NAME} libhdTransEngine.so hdtrans-data
 
-      - name: Upload linux amd64 artifact
+      - name: Upload linux ${{ matrix.goarch }} artifact
         uses: actions/upload-artifact@v7
         with:
-          name: ${{ env.APP_NAME }}-linux-amd64
-          path: dist/${{ env.APP_NAME }}-linux-amd64
+          name: ${{ env.APP_NAME }}-linux-${{ matrix.goarch }}
+          path: dist/${{ env.APP_NAME }}-linux-${{ matrix.goarch }}.tar.gz
 
-      - name: Upload linux arm64 artifact
-        uses: actions/upload-artifact@v7
+  release:
+    name: Create GitHub release
+    runs-on: ubuntu-latest
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v8
         with:
-          name: ${{ env.APP_NAME }}-linux-arm64
-          path: dist/${{ env.APP_NAME }}-linux-arm64
+          pattern: ${{ env.APP_NAME }}-linux-*
+          path: dist
+          merge-multiple: true
 
       - name: Create GitHub release
-        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v3
         with:
-          files: dist/${{ env.APP_NAME }}-linux-*
+          files: dist/${{ env.APP_NAME }}-linux-*.tar.gz
 
   deploy:
     name: Deploy and restart
     runs-on: ubuntu-latest
-    needs: verify-build
+    needs: build
     environment: production
     steps:
       - name: Configure SSH
@@ -72,7 +119,7 @@ jobs:
           chmod 600 ~/.ssh/deploy_key
           ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
 
-      - name: Select target binary
+      - name: Select target package
         id: target
         env:
           DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
@@ -91,10 +138,10 @@ jobs:
               exit 1
               ;;
           esac
-          binary="dist/${APP_NAME}-linux-${target_arch}"
+          package="dist/${APP_NAME}-linux-${target_arch}.tar.gz"
           echo "arch=$target_arch" >> "$GITHUB_OUTPUT"
           echo "artifact=${APP_NAME}-linux-${target_arch}" >> "$GITHUB_OUTPUT"
-          echo "binary=$binary" >> "$GITHUB_OUTPUT"
+          echo "package=$package" >> "$GITHUB_OUTPUT"
           echo "Detected deploy target architecture: $arch -> linux-${target_arch}"
 
       - name: Download target build artifact
@@ -103,18 +150,27 @@ jobs:
           name: ${{ steps.target.outputs.artifact }}
           path: dist
 
-      - name: Copy binary
+      - name: Copy binary and hdTrans engine
         env:
           DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
           DEPLOY_USER: ${{ vars.DEPLOY_USER }}
           DEST: ${{ vars.DEPLOY_PATH }}
-          TARGET_BINARY: ${{ steps.target.outputs.binary }}
+          TARGET_PACKAGE: ${{ steps.target.outputs.package }}
         run: |
-          test -f "$TARGET_BINARY"
-          chmod +x "$TARGET_BINARY"
+          test -f "$TARGET_PACKAGE"
           ssh -i ~/.ssh/deploy_key "$DEPLOY_USER@$DEPLOY_HOST" "sudo mkdir -p '$DEST'"
-          scp -i ~/.ssh/deploy_key "$TARGET_BINARY" "$DEPLOY_USER@$DEPLOY_HOST:~/${APP_NAME}.new"
-          ssh -i ~/.ssh/deploy_key "$DEPLOY_USER@$DEPLOY_HOST" "sudo install -m 0755 \"\$HOME/${APP_NAME}.new\" '$DEST/${APP_NAME}' && sudo rm -f \"\$HOME/${APP_NAME}.new\""
+          scp -i ~/.ssh/deploy_key "$TARGET_PACKAGE" "$DEPLOY_USER@$DEPLOY_HOST:~/${APP_NAME}.tar.gz"
+          # Extract into a staging directory first, then replace the files in DEST. install
+          # unlinks the old binary, so the running service is not written to in place.
+          ssh -i ~/.ssh/deploy_key "$DEPLOY_USER@$DEPLOY_HOST" "set -e
+            rm -rf \"\$HOME/${APP_NAME}-stage\" && mkdir -p \"\$HOME/${APP_NAME}-stage\"
+            tar -xzf \"\$HOME/${APP_NAME}.tar.gz\" -C \"\$HOME/${APP_NAME}-stage\"
+            sudo install -m 0755 \"\$HOME/${APP_NAME}-stage/${APP_NAME}\" '$DEST/${APP_NAME}'
+            sudo install -m 0644 \"\$HOME/${APP_NAME}-stage/libhdTransEngine.so\" '$DEST/libhdTransEngine.so'
+            sudo rm -rf '$DEST/hdtrans-data'
+            sudo cp -r \"\$HOME/${APP_NAME}-stage/hdtrans-data\" '$DEST/hdtrans-data'
+            sudo chmod -R a+rX '$DEST/hdtrans-data'
+            rm -rf \"\$HOME/${APP_NAME}-stage\" \"\$HOME/${APP_NAME}.tar.gz\""
 
       - name: Install systemd unit
         env:

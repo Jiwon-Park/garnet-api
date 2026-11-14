@@ -28,20 +28,22 @@ var (
 )
 
 type config struct {
-	Port            string
-	GarnetAddr      string
-	GarnetPass      string
-	GarnetDB        int
-	RequestTTL      time.Duration
-	LRUIdleTTL      time.Duration
-	RedisPoolSize   int
-	HTTPConcurrency int
+	Port             string
+	GarnetAddr       string
+	GarnetPass       string
+	GarnetDB         int
+	RequestTTL       time.Duration
+	LRUIdleTTL       time.Duration
+	RedisPoolSize    int
+	HTTPConcurrency  int
+	TranslateWorkers int
 }
 
 type server struct {
-	cfg config
-	db  *redis.Client
-	log *slog.Logger
+	cfg        config
+	db         *redis.Client
+	log        *slog.Logger
+	translator *translator // nil when the engine could not be loaded
 }
 
 type setRequest struct {
@@ -111,6 +113,13 @@ func main() {
 	})
 
 	srv := &server{cfg: cfg, db: db, log: logger}
+	tr, err := newTranslator(cfg.TranslateWorkers)
+	if err != nil {
+		logger.Error("translation disabled", slog.String("err", err.Error()))
+	} else {
+		srv.translator = tr
+		logger.Info("hdtrans engine loaded", slog.String("version", tr.Version()), slog.Int("workers", cfg.TranslateWorkers))
+	}
 	app := newApp(srv)
 
 	go func() {
@@ -132,6 +141,9 @@ func main() {
 	}
 	if err := db.Close(); err != nil {
 		logger.Error("close garnet client", slog.String("err", err.Error()))
+	}
+	if srv.translator != nil {
+		closeTranslator()
 	}
 	logger.Info("shutdown complete", slog.Duration("elapsed", time.Since(shutdownStart)))
 }
@@ -163,6 +175,7 @@ func newApp(srv *server) *fiber.App {
 	app.Put("/keys/:key", srv.set)
 	app.Delete("/keys/:key", srv.remove)
 	app.Post("/keys", srv.batch)
+	app.Post("/translate", srv.translate)
 	return app
 }
 
@@ -486,14 +499,15 @@ func validateValue(val string) error {
 func loadConfig() config {
 	cpus := runtime.GOMAXPROCS(0)
 	return config{
-		Port:            envString("PORT", "3000"),
-		GarnetAddr:      envString("GARNET_ADDR", "127.0.0.1:6379"),
-		GarnetPass:      os.Getenv("GARNET_PASSWORD"),
-		GarnetDB:        envInt("GARNET_DB", 0),
-		RequestTTL:      time.Duration(envInt("REQUEST_TIMEOUT_MS", 500)) * time.Millisecond,
-		LRUIdleTTL:      time.Duration(envInt("LRU_IDLE_TTL_SECONDS", 0)) * time.Second,
-		RedisPoolSize:   envInt("REDIS_POOL_SIZE", cpus*4),
-		HTTPConcurrency: envInt("HTTP_CONCURRENCY", 256*1024),
+		Port:             envString("PORT", "3000"),
+		GarnetAddr:       envString("GARNET_ADDR", "127.0.0.1:6379"),
+		GarnetPass:       os.Getenv("GARNET_PASSWORD"),
+		GarnetDB:         envInt("GARNET_DB", 0),
+		RequestTTL:       time.Duration(envInt("REQUEST_TIMEOUT_MS", 500)) * time.Millisecond,
+		LRUIdleTTL:       time.Duration(envInt("LRU_IDLE_TTL_SECONDS", 0)) * time.Second,
+		RedisPoolSize:    envInt("REDIS_POOL_SIZE", cpus*4),
+		HTTPConcurrency:  envInt("HTTP_CONCURRENCY", 256*1024),
+		TranslateWorkers: envInt("TRANSLATE_WORKERS", cpus),
 	}
 }
 

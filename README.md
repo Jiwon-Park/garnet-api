@@ -1,6 +1,6 @@
 # garnet-api
 
-Lightweight GoFiber API server providing a single key-value endpoint over Garnet. Two routes only: a health probe and `GET / PUT /keys/{key}`.
+Lightweight GoFiber API server: a key-value API over Garnet, plus `POST /translate`, a Japanese→Korean translation endpoint backed by the hdTrans engine (`libhdTransEngine`) loaded once per process via cgo.
 
 ## API
 
@@ -8,7 +8,28 @@ Lightweight GoFiber API server providing a single key-value endpoint over Garnet
 GET /healthz
 GET /keys/{key}
 PUT /keys/{key}
+DELETE /keys/{key}
+POST /keys
+POST /translate
 ```
+
+### Translate
+
+**`POST /translate`** — translate Japanese text. Body:
+
+```json
+{
+  "text": "今日は本を読みます。\n肉がジュージューと焼ける",
+  "context": "optional preceding lines of the same document"
+}
+```
+
+Response: `{"text": "오늘은 책을 읽습니다.\n고기가 지글지글 구워진다"}`
+
+- `text` is required, at most 64 KiB, and may hold several `\n`-separated lines; they are translated as one document and the line count is kept.
+- `context` is optional (at most 64 KiB). The lines before the text, so names, speech and quotes carry over. It is not included in the response.
+- The engine is loaded once at startup. Requests run concurrently, limited to `TRANSLATE_WORKERS` engine calls at a time.
+- Returns `503` when the server was built without cgo or the engine failed to load; key-value routes keep working.
 
 ### Operations
 
@@ -43,18 +64,25 @@ Keys may only contain `A-Za-z0-9._:/@-`, be at most 512 bytes. Set values must b
 | `LRU_IDLE_TTL_SECONDS` | `0` | Access-refreshed idle TTL. `0` means no TTL — keys live until explicitly deleted |
 | `REDIS_POOL_SIZE` | `GOMAXPROCS * 32` | Garnet connection pool size |
 | `HTTP_CONCURRENCY` | `262144` | Fiber concurrent connection limit |
+| `TRANSLATE_WORKERS` | `GOMAXPROCS` | Max concurrent hdTrans engine calls |
 
 ## Local Run
 
+`/translate` needs cgo and `libhdTransEngine`. Build hdTrans first (`cmake --preset linux && cmake --build --preset linux`, see hdTrans `docs/build.md`), then point cgo at its output directory. That directory must also contain `hdtrans-data/dicts.hdsnap` (`hdtrans --dicts dicts --compile-snapshot "$PWD/hdtrans-data/dicts.hdsnap"`).
+
 ```bash
+export CGO_LDFLAGS="-L/path/to/hdTrans/build/linux"
+export LD_LIBRARY_PATH=/path/to/hdTrans/build/linux
 go mod tidy
 go test ./...
 go run .
 ```
 
+At runtime the binary looks for `libhdTransEngine.so` next to itself (`-rpath $ORIGIN`), so a deployed binary needs `libhdTransEngine.so` and `hdtrans-data/` beside it. Without cgo (`CGO_ENABLED=0`) the server still builds and runs, but `/translate` returns 503.
+
 ## GitHub Actions Release
 
-Release runs on GitHub-hosted Ubuntu runners. Build and release artifacts are created on GitHub; only copying the binary and restarting systemd happen on your server.
+Release runs on GitHub-hosted Ubuntu runners (amd64 and arm64). Each release package `garnet-api-linux-<arch>.tar.gz` contains the binary, `libhdTransEngine.so` and `hdtrans-data/`; the deploy step copies all three into `DEPLOY_PATH`. The hdTrans version comes from the `HDTRANS_REF` repository variable (default `v0.9.5`). Build and release artifacts are created on GitHub; only copying the binary and restarting systemd happen on your server.
 
 Required GitHub repository or environment variables:
 
