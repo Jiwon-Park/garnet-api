@@ -64,7 +64,7 @@ func (t *translator) Version() string {
 // Translate translates text (one or more "\n"-separated lines). When contextText is
 // non-empty it is passed as the preceding lines of the same document.
 func (t *translator) Translate(contextText, text string) (string, error) {
-	if t == nil {
+	if t == nil || t.sem == nil {
 		return "", errTranslatorUnavailable
 	}
 	t.sem <- struct{}{}

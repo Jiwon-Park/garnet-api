@@ -11,7 +11,14 @@ PUT /keys/{key}
 DELETE /keys/{key}
 POST /keys
 POST /translate
+POST /v1/chat/completions
 ```
+
+### OpenAI-compatible batch translation
+
+**`POST /v1/chat/completions`** takes an OpenAI chat request. Only the last `user` message is read, and it holds a JSON object `{"0": "...", "1": "..."}` (an array of strings also works). Other fields are ignored. The reply is a normal chat completion whose `choices[0].message.content` is `{"translations": [...]}` in index order.
+
+If `TRANSLATE_API_KEY` is set, the request must send it in `Authorization`, either bare or as `Bearer <key>`.
 
 ### Translate
 

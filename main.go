@@ -37,6 +37,7 @@ type config struct {
 	RedisPoolSize    int
 	HTTPConcurrency  int
 	TranslateWorkers int
+	TranslateAPIKey  string
 }
 
 type server struct {
@@ -176,6 +177,7 @@ func newApp(srv *server) *fiber.App {
 	app.Delete("/keys/:key", srv.remove)
 	app.Post("/keys", srv.batch)
 	app.Post("/translate", srv.translate)
+	app.Post("/v1/chat/completions", srv.chatCompletions)
 	return app
 }
 
@@ -508,6 +510,7 @@ func loadConfig() config {
 		RedisPoolSize:    envInt("REDIS_POOL_SIZE", cpus*4),
 		HTTPConcurrency:  envInt("HTTP_CONCURRENCY", 256*1024),
 		TranslateWorkers: envInt("TRANSLATE_WORKERS", cpus),
+		TranslateAPIKey:  os.Getenv("TRANSLATE_API_KEY"),
 	}
 }
 
