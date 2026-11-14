@@ -29,7 +29,6 @@
   <div class="row">
     <label for="base">Base URL</label>
     <input id="base" type="text" value="http://127.0.0.1:3000" />
-    <button id="health-btn">Check health</button>
  </div>
 
   <h2>Key-value</h2>
@@ -40,7 +39,7 @@
   <label for="ttl">TTL seconds (optional, 0 = no expiration</label>
   <input id="ttl" type="number" min="0" placeholder="3600" />
   <div class="row">
-    <button id="get-btn">GET</button>
+    <button id="get-btn">Get</button>
     <button id="set-btn">PUT</button>
  </div>
   <p class="muted">No DELETE endpoint. To drop a key, write it with a 1-second TTL and wait</p>
@@ -89,12 +88,10 @@
       return n;
     }
 
-    $("health-btn").addEventListener("click", () => call("GET", "/healthz"));
-
     $("get-btn").addEventListener("click", () => {
       const k = trim($("key").value);
       if (!k) return (out.textContent = "key required", out.className = "err");
-      call("GET", "/keys/" + encodeURIComponent(k));
+      call("POST", "/keys", { type: "get", keys: [k] });
     });
 
     $("set-btn").addEventListener("click", () => {

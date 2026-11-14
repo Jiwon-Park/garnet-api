@@ -62,21 +62,12 @@ type batchItem struct {
 	Value      string `json:"value"`
 	TTLSeconds *int64 `json:"ttl_seconds,omitempty"`
 }
-type valueResponse struct {
-	Key   string `json:"key"`
-	Value string `json:"value"`
-}
-
 type statusResponse struct {
 	Key     string `json:"key"`
 	Status  string `json:"status,omitempty"`
 	Removed bool   `json:"removed,omitempty"`
 }
 
-type healthResponse struct {
-	Status string `json:"status"`
-	Garnet string `json:"garnet"`
-}
 type batchGetResponse struct {
 	Key   string `json:"key"`
 	Value string `json:"value,omitempty"`
@@ -171,57 +162,12 @@ func newApp(srv *server) *fiber.App {
 		},
 	})
 
-	app.Get("/healthz", srv.health)
-	app.Get("/keys/:key", srv.get)
 	app.Put("/keys/:key", srv.set)
 	app.Delete("/keys/:key", srv.remove)
 	app.Post("/keys", srv.batch)
 	app.Post("/translate", srv.translate)
 	app.Post("/v1/chat/completions", srv.chatCompletions)
 	return app
-}
-
-func (s *server) health(c fiber.Ctx) error {
-	ctx, cancel := context.WithTimeout(context.Background(), s.cfg.RequestTTL)
-	defer cancel()
-	if err := s.db.Ping(ctx).Err(); err != nil {
-		s.log.Warn("health garnet ping failed", slog.String("err", err.Error()))
-		return c.Status(fiber.StatusServiceUnavailable).JSON(healthResponse{Status: "unhealthy", Garnet: err.Error()})
-	}
-	return c.JSON(healthResponse{Status: "ok", Garnet: "pong"})
-}
-
-func (s *server) get(c fiber.Ctx) error {
-	key, err := url.PathUnescape(c.Params("key"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "invalid key")
-	}
-	if err := validateKey(key); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, err.Error())
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), s.cfg.RequestTTL)
-	defer cancel()
-
-	// Access-refreshed LRU eviction: when LRUIdleTTL > 0, GETEX refreshes the key's
-	// idle TTL on every successful read so recently used keys stay alive and idle keys
-	// are expired by Garnet. When LRUIdleTTL is 0, no TTL is applied — keys live
-	// until explicitly deleted or expired via the per-request ttl_seconds.
-	var cmd *redis.StringCmd
-	if s.cfg.LRUIdleTTL > 0 {
-		cmd = s.db.GetEx(ctx, key, s.cfg.LRUIdleTTL)
-	} else {
-		cmd = s.db.Get(ctx, key)
-	}
-	value, err := cmd.Result()
-	if errors.Is(err, redis.Nil) {
-		return fiber.NewError(fiber.StatusNotFound, "key not found")
-	}
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadGateway, err.Error())
-	}
-
-	return c.JSON(valueResponse{Key: key, Value: value})
 }
 
 func (s *server) set(c fiber.Ctx) error {
