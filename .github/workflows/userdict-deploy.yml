@@ -1,0 +1,93 @@
+name: Userdict deploy
+
+# Updates only the user dictionary on the server. The engine reloads user dictionary
+# files on change, so the service is not restarted.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "userdict/userdict.txt.enc"
+      - ".github/workflows/userdict-deploy.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: userdict-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy user dictionary
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Decrypt and validate user dictionary
+        env:
+          USERDICT_PASSWORD: ${{ secrets.USERDICT_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -z "$USERDICT_PASSWORD" ]; then
+            echo "::error::USERDICT_PASSWORD secret is not set"
+            exit 1
+          fi
+          mkdir -p dist
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:USERDICT_PASSWORD \
+            -in userdict/userdict.txt.enc -out dist/userdict.txt
+
+          entries=$(grep -vc '^#' dist/userdict.txt || true)
+          if [ "$entries" -eq 0 ]; then
+            echo "::error::decrypted dictionary has no entries"
+            exit 1
+          fi
+          # Every entry needs at least a Japanese and a Korean field separated by a tab.
+          bad=$(grep -v '^#' dist/userdict.txt | grep -vc $'^[^\t]\+\t[^\t]\+' || true)
+          if [ "$bad" -ne 0 ]; then
+            echo "::error::$bad entries are not in 'japanese<TAB>korean[<TAB>pos]' form"
+            exit 1
+          fi
+          echo "user dictionary: $entries entries"
+
+      - name: Configure SSH
+        env:
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
+
+      - name: Upload and install user dictionary
+        env:
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ vars.DEPLOY_USER }}
+          DEST: ${{ vars.DEPLOY_PATH }}
+        run: |
+          set -euo pipefail
+          scp -i ~/.ssh/deploy_key dist/userdict.txt "$DEPLOY_USER@$DEPLOY_HOST:~/userdict.txt.new"
+          # Install to a temporary name in the same directory, then rename. The engine ignores
+          # *.tmp files, so it never reads a half-written dictionary.
+          ssh -i ~/.ssh/deploy_key "$DEPLOY_USER@$DEPLOY_HOST" "set -e
+            sudo -n install -d -m 0755 '$DEST/hdtrans-data/user'
+            sudo -n install -m 0644 \"\$HOME/userdict.txt.new\" '$DEST/hdtrans-data/user/userdict.txt.tmp'
+            sudo -n mv -f '$DEST/hdtrans-data/user/userdict.txt.tmp' '$DEST/hdtrans-data/user/userdict.txt'
+            rm -f \"\$HOME/userdict.txt.new\""
+
+      - name: Check service and smoke test
+        env:
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ vars.DEPLOY_USER }}
+          DEPLOY_SERVICE: ${{ vars.DEPLOY_SERVICE }}
+        run: |
+          set -euo pipefail
+          sleep 3
+          ssh -i ~/.ssh/deploy_key "$DEPLOY_USER@$DEPLOY_HOST" "sudo systemctl is-active --quiet '$DEPLOY_SERVICE'"
+          # Non-fatal: shows what the running server returns for a sample term.
+          ssh -i ~/.ssh/deploy_key "$DEPLOY_USER@$DEPLOY_HOST" \
+            "curl -fsS -X POST http://127.0.0.1:3000/translate -H 'Content-Type: application/json' -d '{\"text\":\"ブレイブスキル\"}' || echo 'smoke test request failed'"
